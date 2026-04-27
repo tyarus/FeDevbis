@@ -1,0 +1,125 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+}
+
+@layer components {
+  .section-padding {
+    padding: 1rem;
+  }
+
+  @media (min-width: 768px) {
+    .section-padding {
+      padding: 1.5rem;
+    }
+  }
+
+  .max-content {
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .btn-primary {
+    background-color: #0071e3;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 500;
+    font-size: 13px;
+    line-height: 1.5;
+    transition-property: all;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+    border: none;
+    cursor: pointer;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-secondary {
+    border: 1px solid #d2d2d7;
+    background-color: #ffffff;
+    color: #111111;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 500;
+    font-size: 13px;
+    line-height: 1.5;
+    transition-property: all;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+    cursor: pointer;
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background-color: #f9f9f9;
+  }
+
+  .btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .input-base {
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 15px;
+    line-height: 1.6;
+    transition-property: all;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+    font-weight: 400;
+  }
+
+  .input-base:focus {
+    border-color: #0071e3;
+    outline: none;
+  }
+
+  .card-border {
+    border: 1px solid #d2d2d7;
+    border-radius: 12px;
+  }
+
+  .shimmer {
+    background: linear-gradient(90deg, #f0f0f0 0%, #e0e0e0 50%, #f0f0f0 100%);
+    background-size: 200%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+}
