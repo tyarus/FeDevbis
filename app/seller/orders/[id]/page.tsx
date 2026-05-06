@@ -9,7 +9,7 @@ import { OrderStatusBadge, OrderTimeline, LoadingSkeleton, ConfirmDialog } from 
 import { formatRupiah, formatDate, formatDateShort } from "@/lib/utils";
 import { Truck } from "lucide-react";
 
-const fetcher = (url: string) => apiClient.get(url).then((res) => res.data);
+const fetcher = (url: string) => apiClient.get(url).then((res) => res.data.data);
 
 export default function SellerOrderDetailPage() {
   const params = useParams();
@@ -22,7 +22,7 @@ export default function SellerOrderDetailPage() {
 
   const orderId = params.id as string;
   const { data: order, isLoading, mutate } = useSWR<Order>(
-    `/seller/orders/${orderId}`,
+    `/orders/${orderId}`,
     fetcher,
     { revalidateOnFocus: false }
   );
@@ -73,7 +73,7 @@ export default function SellerOrderDetailPage() {
       await apiClient.put(`/seller/orders/${order.id}/ship`, {
         tracking_number: trackingNumber,
       });
-      mutate();
+      await mutate();
       setIsConfirmDialogOpen(false);
     } catch (err: any) {
       setError(err.response?.data?.message || "Gagal mengirim pesanan");
@@ -82,7 +82,10 @@ export default function SellerOrderDetailPage() {
     }
   };
 
-  const canShip = order.status === "processing" || order.status === "paid";
+  const canShip = order.status === "paid" || order.status === "processing";
+  const isShippedToBuyer = order.status === "shipped" || order.status === "delivered";
+  const sellerStatusMessage =
+    "Pesanan sudah dikirim. Buyer sekarang bisa langsung konfirmasi penerimaan agar pesanan selesai dan dana di-release ke seller.";
 
   return (
     <div className="section-padding">
@@ -91,13 +94,11 @@ export default function SellerOrderDetailPage() {
           onClick={() => router.back()}
           className="text-xs text-text-secondary hover:text-text-primary mb-8"
         >
-          ← Kembali ke Pesanan
+          {"<-"} Kembali ke Pesanan
         </button>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {/* Left: Order Details */}
           <div className="md:col-span-2">
-            {/* Status Section */}
             <div className="card-border p-6 mb-6">
               <div className="flex items-start justify-between mb-4">
                 <div>
@@ -111,7 +112,6 @@ export default function SellerOrderDetailPage() {
               </p>
             </div>
 
-            {/* Buyer Info */}
             <div className="card-border p-6 mb-6">
               <h2 className="text-base font-medium text-text-primary mb-4">Informasi Pembeli</h2>
               <div className="space-y-2">
@@ -126,7 +126,6 @@ export default function SellerOrderDetailPage() {
               </div>
             </div>
 
-            {/* Product Details */}
             <div className="card-border p-6 mb-6">
               <h2 className="text-base font-medium text-text-primary mb-4">Rincian Produk</h2>
               <div className="space-y-3">
@@ -145,7 +144,14 @@ export default function SellerOrderDetailPage() {
               </div>
             </div>
 
-            {/* Shipping Form */}
+            {isShippedToBuyer && (
+              <div className="card-border p-6 mb-6 bg-green-50 border-green-200">
+                <p className="text-sm text-green-700">
+                  {sellerStatusMessage}
+                </p>
+              </div>
+            )}
+
             {canShip && (
               <div className="card-border p-6 mb-6">
                 <h2 className="text-base font-medium text-text-primary mb-4">Kirim Pesanan</h2>
@@ -190,14 +196,12 @@ export default function SellerOrderDetailPage() {
               </div>
             )}
 
-            {/* Timeline */}
             <div className="card-border p-6">
               <h2 className="text-base font-medium text-text-primary mb-4">Timeline Pesanan</h2>
               <OrderTimeline order={order} />
             </div>
           </div>
 
-          {/* Right: Summary Sidebar */}
           <div>
             <div className="card-border p-6 sticky top-20">
               <h3 className="text-base font-medium text-text-primary mb-6">Ringkasan</h3>
@@ -228,16 +232,21 @@ export default function SellerOrderDetailPage() {
                   Mohon masukkan nomor tracking untuk mengirim pesanan ini kepada pembeli.
                 </div>
               )}
+
+              {isShippedToBuyer && (
+                <div className="mt-4 p-3 bg-green-50 border border-green-300 rounded-input text-xs text-green-700">
+                  {sellerStatusMessage}
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Confirm Dialog */}
         <ConfirmDialog
           open={isConfirmDialogOpen}
           onOpenChange={setIsConfirmDialogOpen}
           title="Konfirmasi Pengiriman"
-          description="Pastikan nomor tracking sudah benar sebelum mengirim. Pembeli akan menerima notifikasi."
+          description="Pastikan nomor tracking sudah benar sebelum mengirim. Buyer akan menerima notifikasi."
           onConfirm={handleShip}
           confirmLabel="Kirim Pesanan"
           isLoading={isSubmitting}

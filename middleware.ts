@@ -8,9 +8,13 @@ export function middleware(request: NextRequest) {
 
   if (userCookie) {
     try {
-      user = JSON.parse(userCookie);
-    } catch (e) {
-      // Invalid cookie
+      user = JSON.parse(decodeURIComponent(userCookie));
+    } catch {
+      try {
+        user = JSON.parse(userCookie);
+      } catch {
+        // Invalid cookie
+      }
     }
   }
 

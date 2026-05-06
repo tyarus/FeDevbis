@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
@@ -11,7 +11,10 @@ import { formatRupiah, formatDateShort } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Edit2, Trash2, Plus } from "lucide-react";
 
 const fetcher = (url: string) =>
-  apiClient.get(url).then((res) => res.data as PaginatedResponse<Product>);
+  apiClient.get(url).then((res) => ({
+    data: res.data.data,
+    pagination: res.data.pagination,
+  }));
 
 export default function SellerProductsPage() {
   const router = useRouter();
@@ -26,8 +29,13 @@ export default function SellerProductsPage() {
     setIsMounted(true);
   }, []);
 
+  const url = useMemo(
+    () => `/seller/products?page=${currentPage}&limit=10`,
+    [currentPage]
+  );
+
   const { data, isLoading, mutate } = useSWR<PaginatedResponse<Product>>(
-    `/seller/products?page=${currentPage}&limit=10`,
+    url,
     fetcher,
     { revalidateOnFocus: false }
   );
@@ -141,7 +149,7 @@ export default function SellerProductsPage() {
             </div>
 
             {/* Pagination */}
-            {pagination && pagination.total_pages > 1 && (
+            {pagination && pagination.last_page > 1 && (
               <div className="flex items-center justify-center gap-4 mt-8">
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
@@ -152,11 +160,11 @@ export default function SellerProductsPage() {
                   Sebelumnya
                 </button>
                 <div className="text-xs text-text-secondary">
-                  Halaman {pagination.current_page} dari {pagination.total_pages}
+                  Halaman {pagination.current_page} dari {pagination.last_page}
                 </div>
                 <button
-                  onClick={() => setCurrentPage((p) => Math.min(pagination.total_pages, p + 1))}
-                  disabled={currentPage === pagination.total_pages}
+                  onClick={() => setCurrentPage((p) => Math.min(pagination.last_page, p + 1))}
+                  disabled={currentPage === pagination.last_page}
                   className="btn-secondary text-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   Selanjutnya

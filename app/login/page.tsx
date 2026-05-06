@@ -14,6 +14,17 @@ const loginSchema = z.object({
   password: z.string().min(6, "Password minimal 6 karakter"),
 });
 
+const getApiErrorMessage = (error: unknown, fallback: string): string => {
+  if (typeof error === "object" && error !== null) {
+    const maybeError = error as { response?: { data?: { message?: string } } };
+    if (maybeError.response?.data?.message) {
+      return maybeError.response.data.message;
+    }
+  }
+
+  return fallback;
+};
+
 export default function LoginPage() {
   const router = useRouter();
   const { login, isLoading, error, clearError } = useAuthStore();
@@ -31,10 +42,11 @@ export default function LoginPage() {
     setApiError(null);
     clearError();
     try {
-      await login(data);
-      router.push("/dashboard");
-    } catch (err: any) {
-      setApiError(err.response?.data?.message || "Login gagal");
+      const user = await login(data);
+      const redirectUrl = user.role === "seller" ? "/seller/dashboard" : "/dashboard";
+      router.push(redirectUrl);
+    } catch (err: unknown) {
+      setApiError(getApiErrorMessage(err, "Login gagal"));
     }
   };
 

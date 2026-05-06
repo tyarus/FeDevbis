@@ -8,7 +8,11 @@ import { Product } from "@/types";
 import { ProductCard, LoadingSkeleton, EmptyState } from "@/components";
 import { ShoppingBag, Lock, Zap } from "lucide-react";
 
-const fetcher = (url: string) => apiClient.get(url).then((res) => res.data);
+const fetcher = (url: string) =>
+  apiClient.get(url).then((res) => ({
+    data: res.data.data,
+    pagination: res.data.pagination,
+  }));
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);

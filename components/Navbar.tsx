@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/authStore";
 import { ChevronDown } from "lucide-react";
+import { NotificationDropdown } from "./NotificationDropdown";
 
 export function Navbar() {
   const router = useRouter();
@@ -64,39 +65,45 @@ export function Navbar() {
               </Link>
             </>
           ) : (
-            <div className="relative">
-              <button
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="flex items-center gap-2 text-xs leading-5 text-text-primary hover:text-text-secondary transition-colors"
-              >
-                {user?.name}
-                <ChevronDown size={16} />
-              </button>
+            <div className="flex items-center gap-4">
+              {/* Notification Dropdown for Sellers */}
+              <NotificationDropdown />
 
-              {isDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-white border border-border rounded-card shadow-lg">
-                  <Link
-                    href={user?.role === "seller" ? "/seller/dashboard" : "/dashboard"}
-                    className="block px-4 py-3 text-xs hover:bg-bg-secondary transition-colors"
-                  >
-                    Dashboard
-                  </Link>
-                  {user?.role === "seller" && (
+              {/* Profile Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="flex items-center gap-2 text-xs leading-5 text-text-primary hover:text-text-secondary transition-colors"
+                >
+                  {user?.name}
+                  <ChevronDown size={16} />
+                </button>
+
+                {isDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white border border-border rounded-card shadow-lg">
                     <Link
-                      href="/seller/products"
-                      className="block px-4 py-3 text-xs hover:bg-bg-secondary transition-colors border-t border-border"
+                      href={user?.role === "seller" ? "/seller/dashboard" : "/dashboard"}
+                      className="block px-4 py-3 text-xs hover:bg-bg-secondary transition-colors"
                     >
-                      Produk Saya
+                      Dashboard
                     </Link>
-                  )}
-                  <button
-                    onClick={handleLogout}
-                    className="w-full text-left px-4 py-3 text-xs text-accent-error hover:bg-bg-secondary transition-colors border-t border-border"
-                  >
-                    Keluar
-                  </button>
-                </div>
-              )}
+                    {user?.role === "seller" && (
+                      <Link
+                        href="/seller/products"
+                        className="block px-4 py-3 text-xs hover:bg-bg-secondary transition-colors border-t border-border"
+                      >
+                        Produk Saya
+                      </Link>
+                    )}
+                    <button
+                      onClick={handleLogout}
+                      className="w-full text-left px-4 py-3 text-xs text-accent-error hover:bg-bg-secondary transition-colors border-t border-border"
+                    >
+                      Keluar
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

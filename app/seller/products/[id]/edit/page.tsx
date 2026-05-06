@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,23 +9,27 @@ import useSWR from "swr";
 import { apiClient } from "@/lib/api";
 import { Product, UpdateProductInput } from "@/types";
 import { LoadingSkeleton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components";
+import { Upload, X, Image as ImageIcon } from "lucide-react";
 
 const productSchema = z.object({
   name: z.string().min(3, "Nama minimal 3 karakter").optional(),
   description: z.string().min(10, "Deskripsi minimal 10 karakter").optional(),
   price: z.number().min(1000, "Harga minimal Rp 1.000").optional(),
   stock: z.number().min(0, "Stok tidak boleh negatif").optional(),
-  image_url: z.string().url("URL gambar tidak valid").optional().or(z.literal("")),
+  image_url: z.string().optional().or(z.literal("")),
   status: z.enum(["active", "inactive"]).optional(),
 }).partial();
 
-const fetcher = (url: string) => apiClient.get(url).then((res) => res.data);
+const fetcher = (url: string) => apiClient.get(url).then((res) => res.data.data);
 
 export default function EditProductPage() {
   const params = useParams();
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const productId = params.id as string;
   const { data: product, isLoading } = useSWR<Product>(
@@ -45,10 +49,60 @@ export default function EditProductPage() {
   });
 
   const status = watch("status");
-  const imageUrl = watch("image_url");
-  const price = watch("price");
   const name = watch("name");
+  const price = watch("price");
   const stock = watch("stock");
+
+  // Handle file selection
+  const handleFileSelect = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      alert("Pilih file gambar yang valid (JPG, PNG, GIF, WebP)");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Ukuran gambar tidak boleh lebih dari 5MB");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imageUrl = e.target?.result as string;
+      setImagePreview(imageUrl);
+      setValue("image_url", imageUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle drag and drop
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleFileSelect(files[0]);
+    }
+  };
+
+  // Clear image
+  const handleClearImage = () => {
+    setImagePreview(null);
+    setValue("image_url", "");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
 
   useEffect(() => {
     if (product) {
@@ -58,6 +112,9 @@ export default function EditProductPage() {
       setValue("stock", product.stock);
       setValue("image_url", product.image_url || "");
       setValue("status", product.status);
+      if (product.image_url) {
+        setImagePreview(product.image_url);
+      }
     }
   }, [product, setValue]);
 
@@ -191,21 +248,50 @@ export default function EditProductPage() {
               )}
             </div>
 
-            {/* Image URL */}
+            {/* Image Upload */}
             <div>
-              <label htmlFor="image_url" className="block text-label text-text-primary mb-2">
-                URL Gambar (Opsional)
+              <label className="block text-label text-text-primary mb-2">
+                Gambar Produk
               </label>
-              <input
-                {...register("image_url")}
-                type="url"
-                placeholder="https://..."
-                className="input-base w-full text-body"
-                disabled={isSubmitting}
-              />
-              {errors.image_url && (
-                <p className="text-xs text-accent-error mt-1">{errors.image_url.message}</p>
-              )}
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
+                  isDragging
+                    ? "border-accent-primary bg-blue-50"
+                    : "border-border bg-gray-50 hover:border-accent-primary hover:bg-blue-50/30"
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFileSelect(file);
+                  }}
+                  className="hidden"
+                />
+
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-12 h-12 bg-accent-primary/10 rounded-lg flex items-center justify-center">
+                    <Upload size={24} className="text-accent-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-text-primary">
+                      Drag & drop gambar di sini
+                    </p>
+                    <p className="text-xs text-text-secondary mt-1">
+                      atau klik untuk memilih file
+                    </p>
+                  </div>
+                  <p className="text-xs text-text-secondary">
+                    Format: JPG, PNG, GIF, WebP (Max 5MB)
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Status */}
@@ -243,32 +329,56 @@ export default function EditProductPage() {
 
           {/* Preview */}
           <div>
-            <div className="card-border p-6 sticky top-20">
-              <h3 className="text-base font-medium text-text-primary mb-4">Preview</h3>
+            <div className="card-border bg-gradient-to-br from-white to-gray-50 p-6 sticky top-20 rounded-lg shadow-sm">
+              <h3 className="text-base font-semibold text-text-primary mb-6">
+                Preview Produk
+              </h3>
 
-              {imageUrl && (
-                <div className="mb-4 rounded-card overflow-hidden bg-bg-secondary aspect-video">
-                  <img
-                    src={imageUrl}
-                    alt="Preview"
-                    className="w-full h-full object-cover"
-                    onError={() => {
-                      alert("Gagal memuat gambar. Periksa URL gambar.");
-                    }}
-                  />
-                </div>
-              )}
+              {/* Image Preview */}
+              <div className="mb-6">
+                {imagePreview ? (
+                  <div className="relative rounded-lg overflow-hidden bg-bg-secondary aspect-square mb-3 shadow-md">
+                    <img
+                      src={imagePreview}
+                      alt="Preview"
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleClearImage}
+                      className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white p-2 rounded-full transition-colors shadow-lg"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="rounded-lg overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 aspect-square flex items-center justify-center mb-3 border border-border">
+                    <div className="text-center">
+                      <ImageIcon size={32} className="text-text-secondary opacity-50 mx-auto mb-2" />
+                      <p className="text-xs text-text-secondary">Gambar akan ditampilkan di sini</p>
+                    </div>
+                  </div>
+                )}
+              </div>
 
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs text-text-secondary mb-1">Nama</p>
-                  <p className="font-medium text-text-primary">
+              {/* Product Details */}
+              <div className="space-y-4">
+                {/* Name */}
+                <div className="pb-4 border-b border-border">
+                  <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-2">
+                    Nama Produk
+                  </p>
+                  <p className="font-medium text-text-primary text-sm line-clamp-2">
                     {name || "-"}
                   </p>
                 </div>
-                <div>
-                  <p className="text-xs text-text-secondary mb-1">Harga</p>
-                  <p className="text-lg font-medium text-text-primary">
+
+                {/* Price */}
+                <div className="pb-4 border-b border-border">
+                  <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-2">
+                    Harga
+                  </p>
+                  <p className="text-xl font-bold text-accent-primary">
                     {price && price > 0
                       ? new Intl.NumberFormat("id-ID", {
                           style: "currency",
@@ -278,6 +388,38 @@ export default function EditProductPage() {
                       : "-"}
                   </p>
                 </div>
+
+                {/* Stock */}
+                <div>
+                  <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-2">
+                    Stok Tersedia
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <p className="text-lg font-semibold text-text-primary">
+                        {stock || "0"}
+                      </p>
+                    </div>
+                    <div
+                      className={`px-3 py-1 rounded-full text-xs font-medium ${
+                        stock && stock > 0
+                          ? "bg-green-100 text-green-700"
+                          : "bg-red-100 text-red-700"
+                      }`}
+                    >
+                      {stock && stock > 0 ? "Tersedia" : "Habis"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <div className="mt-6 pt-6 border-t border-border">
+                <div className="inline-flex items-center gap-2 px-3 py-2 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
+                  <div className="w-2 h-2 bg-blue-700 rounded-full"></div>
+                  Status: {status === "active" ? "Aktif" : "Nonaktif"}
+                </div>
+              </div>
                 <div>
                   <p className="text-xs text-text-secondary mb-1">Stok</p>
                   <p className="font-medium text-text-primary">

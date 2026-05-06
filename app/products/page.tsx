@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
 import { Product, PaginatedResponse } from "@/types";
@@ -8,7 +8,10 @@ import { ProductCard, LoadingSkeleton, EmptyState } from "@/components";
 import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 
 const fetcher = (url: string) =>
-  apiClient.get(url).then((res) => res.data as PaginatedResponse<Product>);
+  apiClient.get(url).then((res) => ({
+    data: res.data.data,
+    pagination: res.data.pagination,
+  }));
 
 export default function ProductsPage() {
   const [isMounted, setIsMounted] = useState(false);
@@ -29,14 +32,17 @@ export default function ProductsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const params = new URLSearchParams({
-    page: currentPage.toString(),
-    limit: "12",
-    ...(debouncedSearch && { search: debouncedSearch }),
-  });
+  const url = useMemo(() => {
+    const params = new URLSearchParams({
+      page: currentPage.toString(),
+      limit: "12",
+      ...(debouncedSearch && { search: debouncedSearch }),
+    });
+    return `/products?${params.toString()}`;
+  }, [currentPage, debouncedSearch]);
 
   const { data, isLoading } = useSWR<PaginatedResponse<Product>>(
-    `/products?${params.toString()}`,
+    url,
     fetcher,
     { revalidateOnFocus: false }
   );
@@ -80,7 +86,7 @@ export default function ProductsPage() {
             </div>
 
             {/* Pagination */}
-            {pagination && pagination.total_pages > 1 && (
+            {pagination && pagination.last_page > 1 && (
               <div className="flex items-center justify-center gap-4 mt-12">
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
@@ -92,12 +98,12 @@ export default function ProductsPage() {
                 </button>
 
                 <div className="text-xs text-text-secondary">
-                  Halaman {pagination.current_page} dari {pagination.total_pages}
+                  Halaman {pagination.current_page} dari {pagination.last_page}
                 </div>
 
                 <button
-                  onClick={() => setCurrentPage((p) => Math.min(pagination.total_pages, p + 1))}
-                  disabled={currentPage === pagination.total_pages}
+                  onClick={() => setCurrentPage((p) => Math.min(pagination.last_page, p + 1))}
+                  disabled={currentPage === pagination.last_page}
                   className="btn-secondary text-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   Selanjutnya

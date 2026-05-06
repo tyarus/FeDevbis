@@ -3,6 +3,15 @@ import { ApiError } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
+const clearClientAuthStorage = () => {
+  if (typeof window === "undefined") return;
+
+  localStorage.removeItem("auth_token");
+  localStorage.removeItem("auth_user");
+  document.cookie = "auth_token=; Path=/; Max-Age=0; SameSite=Lax";
+  document.cookie = "auth_user=; Path=/; Max-Age=0; SameSite=Lax";
+};
+
 // Create axios instance
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_URL,
@@ -27,11 +36,8 @@ apiClient.interceptors.response.use(
   (error: AxiosError<ApiError>) => {
     if (error.response?.status === 401) {
       // Clear auth token and redirect to login
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("auth_token");
-        localStorage.removeItem("auth_user");
-        window.location.href = "/login";
-      }
+      clearClientAuthStorage();
+      if (typeof window !== "undefined") window.location.href = "/login";
     }
     return Promise.reject(error);
   }

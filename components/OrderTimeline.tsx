@@ -20,7 +20,7 @@ export function OrderTimeline({ order }: OrderTimelineProps) {
       status:
         order.status === "pending_payment"
           ? "pending"
-          : ["paid", "processing", "shipped", "completed"].includes(order.status)
+          : ["paid", "processing", "shipped", "delivered", "completed"].includes(order.status)
           ? "completed"
           : "cancelled",
       date: order.updated_at,
@@ -30,7 +30,7 @@ export function OrderTimeline({ order }: OrderTimelineProps) {
       status:
         order.status === "processing"
           ? "current"
-          : ["shipped", "completed"].includes(order.status)
+          : ["shipped", "delivered", "completed"].includes(order.status)
           ? "completed"
           : order.status === "pending_payment" || order.status === "paid"
           ? "pending"
@@ -40,7 +40,7 @@ export function OrderTimeline({ order }: OrderTimelineProps) {
     {
       stage: "Dikirim",
       status:
-        order.status === "shipped"
+        order.status === "shipped" || order.status === "delivered"
           ? "current"
           : order.status === "completed"
           ? "completed"

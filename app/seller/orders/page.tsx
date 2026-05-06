@@ -1,16 +1,58 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
 import { Order, PaginatedResponse } from "@/types";
 import { OrderStatusBadge, LoadingSkeleton, EmptyState } from "@/components";
-import { formatRupiah, formatDateShort } from "@/lib/utils";
+import { formatRupiah, formatDateShort, formatShortId } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, ShoppingBag } from "lucide-react";
 
-const fetcher = (url: string) =>
-  apiClient.get(url).then((res) => res.data as PaginatedResponse<Order>);
+const ITEMS_PER_PAGE = 10;
+const FETCH_PAGE_SIZE = 100;
+
+const fetchOrdersPage = async (page: number): Promise<PaginatedResponse<Order>> => {
+  const res = await apiClient.get(`/seller/orders?page=${page}&limit=${FETCH_PAGE_SIZE}`);
+
+  return {
+    data: res.data.data || [],
+    pagination: res.data.pagination || {
+      current_page: 1,
+      total: 0,
+      per_page: FETCH_PAGE_SIZE,
+      last_page: 1,
+    },
+  };
+};
+
+const fetchAllSellerOrders = async (): Promise<Order[]> => {
+  const firstPage = await fetchOrdersPage(1);
+  const allOrders = [...firstPage.data];
+  const lastPage = firstPage.pagination?.last_page || 1;
+
+  const remainingRequests: Array<Promise<PaginatedResponse<Order>>> = [];
+  for (let page = 2; page <= lastPage; page += 1) {
+    remainingRequests.push(fetchOrdersPage(page));
+  }
+
+  const remainingPages = await Promise.all(remainingRequests);
+  for (const pageData of remainingPages) {
+    allOrders.push(...pageData.data);
+  }
+
+  return allOrders;
+};
+
+const matchesStatusFilter = (orderStatus: string, statusFilter: string | null): boolean => {
+  if (!statusFilter) return true;
+
+  if (statusFilter === "shipped") {
+    return orderStatus === "shipped" || orderStatus === "delivered";
+  }
+
+  return orderStatus === statusFilter;
+};
 
 export default function SellerOrdersPage() {
   const [isMounted, setIsMounted] = useState(false);
@@ -21,22 +63,26 @@ export default function SellerOrdersPage() {
     setIsMounted(true);
   }, []);
 
-  const params = new URLSearchParams({
-    page: currentPage.toString(),
-    limit: "10",
-    ...(statusFilter && { status: statusFilter }),
-  });
-
-  const { data, isLoading } = useSWR<PaginatedResponse<Order>>(
-    `/seller/orders?${params.toString()}`,
-    fetcher,
-    { revalidateOnFocus: false }
+  const { data: allOrders, isLoading } = useSWR<Order[]>(
+    "seller-orders-all",
+    fetchAllSellerOrders,
+    { revalidateOnFocus: false, revalidateOnMount: true }
   );
 
-  if (!isMounted) return null;
+  const filteredOrders = useMemo(() => {
+    const sortedOrders = [...(allOrders || [])].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
 
-  const orders = data?.data || [];
-  const pagination = data?.pagination;
+    return sortedOrders.filter((order) => matchesStatusFilter(order.status, statusFilter));
+  }, [allOrders, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / ITEMS_PER_PAGE));
+  const activePage = Math.min(currentPage, totalPages);
+  const startIndex = (activePage - 1) * ITEMS_PER_PAGE;
+  const orders = filteredOrders.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
+  if (!isMounted) return null;
 
   const statuses = [
     { value: null, label: "Semua" },
@@ -53,7 +99,6 @@ export default function SellerOrdersPage() {
       <div className="max-content">
         <h1 className="text-section-heading text-text-primary mb-8">Pesanan Masuk</h1>
 
-        {/* Filter */}
         <div className="mb-8 flex gap-2 flex-wrap">
           {statuses.map((status) => (
             <button
@@ -73,7 +118,6 @@ export default function SellerOrdersPage() {
           ))}
         </div>
 
-        {/* Orders Table */}
         {isLoading ? (
           <LoadingSkeleton variant="line" count={5} />
         ) : orders.length > 0 ? (
@@ -113,7 +157,7 @@ export default function SellerOrdersPage() {
                         className="border-b border-border hover:bg-bg-secondary transition-colors"
                       >
                         <td className="px-6 py-3 text-xs font-medium text-text-primary">
-                          #{order.id.slice(0, 8)}
+                          #{formatShortId(order.id)}
                         </td>
                         <td className="px-6 py-3 text-xs text-text-primary">
                           {order.buyer?.name || "Pembeli Anonim"}
@@ -145,12 +189,11 @@ export default function SellerOrdersPage() {
               </div>
             </div>
 
-            {/* Pagination */}
-            {pagination && pagination.total_pages > 1 && (
+            {totalPages > 1 && (
               <div className="flex items-center justify-center gap-4 mt-8">
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
+                  disabled={activePage === 1}
                   className="btn-secondary text-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   <ChevronLeft size={16} />
@@ -158,12 +201,12 @@ export default function SellerOrdersPage() {
                 </button>
 
                 <div className="text-xs text-text-secondary">
-                  Halaman {pagination.current_page} dari {pagination.total_pages}
+                  Halaman {activePage} dari {totalPages}
                 </div>
 
                 <button
-                  onClick={() => setCurrentPage((p) => Math.min(pagination.total_pages, p + 1))}
-                  disabled={currentPage === pagination.total_pages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={activePage === totalPages}
                   className="btn-secondary text-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   Selanjutnya
@@ -176,7 +219,11 @@ export default function SellerOrdersPage() {
           <EmptyState
             icon={ShoppingBag}
             title="Belum ada pesanan"
-            description="Pesanan akan muncul di sini ketika ada pembeli"
+            description={
+              statusFilter
+                ? "Tidak ada pesanan dengan status ini"
+                : "Pesanan akan muncul di sini ketika ada pembeli"
+            }
           />
         )}
       </div>

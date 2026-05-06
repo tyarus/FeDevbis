@@ -10,7 +10,7 @@ import { useAuthStore } from "@/store/authStore";
 import { LoadingSkeleton, PriceDisplay } from "@/components";
 import { Heart } from "lucide-react";
 
-const fetcher = (url: string) => apiClient.get(url).then((res) => res.data);
+const fetcher = (url: string) => apiClient.get(url).then((res) => res.data.data);
 
 export default function ProductDetailPage() {
   const params = useParams();

@@ -35,12 +35,17 @@ export function formatDateShort(date: string | Date): string {
   }).format(d);
 }
 
+export function formatShortId(id: string | number, length = 8): string {
+  return String(id).slice(0, length);
+}
+
 export function getOrderStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     pending_payment: "Menunggu Pembayaran",
     paid: "Sudah Dibayar",
     processing: "Diproses",
     shipped: "Dikirim",
+    delivered: "Terkirim",
     completed: "Selesai",
     cancelled: "Dibatalkan",
     refunded: "Dikembalikan",
@@ -57,6 +62,7 @@ export function getOrderStatusColor(status: string): {
     paid: { bg: "bg-status-paid-bg", text: "text-status-paid-text" },
     processing: { bg: "bg-status-processing-bg", text: "text-status-processing-text" },
     shipped: { bg: "bg-status-shipped-bg", text: "text-status-shipped-text" },
+    delivered: { bg: "bg-status-shipped-bg", text: "text-status-shipped-text" },
     completed: { bg: "bg-status-completed-bg", text: "text-status-completed-text" },
     cancelled: { bg: "bg-status-cancelled-bg", text: "text-status-cancelled-text" },
     refunded: { bg: "bg-status-refunded-bg", text: "text-status-refunded-text" },

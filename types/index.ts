@@ -49,6 +49,7 @@ export type OrderStatus =
   | "paid"
   | "processing"
   | "shipped"
+  | "delivered"
   | "completed"
   | "cancelled"
   | "refunded";
@@ -119,9 +120,9 @@ export interface PaginatedResponse<T> {
   data: T[];
   pagination: {
     current_page: number;
-    total_pages: number;
-    total_items: number;
-    items_per_page: number;
+    total: number;
+    per_page: number;
+    last_page: number;
   };
 }
 

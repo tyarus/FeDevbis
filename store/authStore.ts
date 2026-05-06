@@ -2,6 +2,17 @@ import { create } from "zustand";
 import { User, LoginInput, RegisterInput } from "@/types";
 import { authAPI, setAuthToken, clearAuthToken, setAuthUser, getAuthUser } from "@/lib/auth";
 
+const getApiErrorMessage = (error: unknown, fallback: string): string => {
+  if (typeof error === "object" && error !== null) {
+    const maybeError = error as { response?: { data?: { message?: string } } };
+    if (maybeError.response?.data?.message) {
+      return maybeError.response.data.message;
+    }
+  }
+
+  return fallback;
+};
+
 interface AuthStore {
   user: User | null;
   token: string | null;
@@ -10,8 +21,8 @@ interface AuthStore {
   isInitialized: boolean;
 
   // Actions
-  login: (data: LoginInput) => Promise<void>;
-  register: (data: RegisterInput) => Promise<void>;
+  login: (data: LoginInput) => Promise<User>;
+  register: (data: RegisterInput) => Promise<User>;
   logout: () => Promise<void>;
   initialize: () => Promise<void>;
   clearError: () => void;
@@ -35,8 +46,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
         token: response.token,
         isLoading: false,
       });
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || "Login failed";
+      return response.user;
+    } catch (error: unknown) {
+      const errorMessage = getApiErrorMessage(error, "Login failed");
       set({
         error: errorMessage,
         isLoading: false,
@@ -56,8 +68,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
         token: response.token,
         isLoading: false,
       });
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || "Registration failed";
+      return response.user;
+    } catch (error: unknown) {
+      const errorMessage = getApiErrorMessage(error, "Registration failed");
       set({
         error: errorMessage,
         isLoading: false,
@@ -102,7 +115,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
           isInitialized: true,
         });
       }
-    } catch (error) {
+    } catch {
       clearAuthToken();
       set({
         user: null,
