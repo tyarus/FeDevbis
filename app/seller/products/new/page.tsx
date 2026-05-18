@@ -6,8 +6,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { apiClient } from "@/lib/api";
-import { CreateProductInput } from "@/types";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components";
+import { CreateProductInput, GameCategory, LoginMethod } from "@/types";
+import { saveProductMetadata } from "@/lib/productMetadata";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, GameCategorySelector, LoginMethodSelector, SecurityGuide } from "@/components";
 import { Upload, X, Image as ImageIcon } from "lucide-react";
 
 const productSchema = z.object({
@@ -17,6 +18,8 @@ const productSchema = z.object({
   stock: z.number().min(1, "Stok minimal 1 unit"),
   image_url: z.string().optional().or(z.literal("")),
   status: z.enum(["active", "inactive"]),
+  game_category: z.string().optional(),
+  login_method: z.string().optional(),
 });
 
 export default function NewProductPage() {
@@ -26,6 +29,7 @@ export default function NewProductPage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [showSecurityGuide, setShowSecurityGuide] = useState(false);
 
   const {
     register,
@@ -46,6 +50,8 @@ export default function NewProductPage() {
   const name = watch("name");
   const price = watch("price");
   const stock = watch("stock");
+  const gameCategory = watch("game_category") as GameCategory | undefined;
+  const loginMethod = watch("login_method") as LoginMethod | undefined;
 
   // Handle file selection
   const handleFileSelect = (file: File) => {
@@ -103,10 +109,33 @@ export default function NewProductPage() {
     setApiError(null);
 
     try {
-      await apiClient.post("/products", data);
+      const payload = {
+        name: data.name,
+        description: data.description,
+        price: data.price,
+        stock: data.stock,
+        image_url: data.image_url,
+        status: data.status,
+      };
+
+      const response = await apiClient.post("/products", payload);
+      const createdProductId = response?.data?.data?.id;
+
+      if (createdProductId) {
+        saveProductMetadata(createdProductId, {
+          game_category: data.game_category ?? gameCategory,
+          login_method: data.login_method ?? loginMethod,
+        });
+      }
+
       router.push("/seller/products");
-    } catch (error: any) {
-      setApiError(error.response?.data?.message || "Gagal membuat produk");
+    } catch (error: unknown) {
+      if (error && typeof error === "object" && "response" in error) {
+        const axiosError = error as { response?: { data?: { message?: string } } };
+        setApiError(axiosError.response?.data?.message || "Gagal membuat produk");
+      } else {
+        setApiError("Gagal membuat produk");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -262,8 +291,31 @@ export default function NewProductPage() {
               </Select>
             </div>
 
+            {/* Game Category Selector */}
+            <div className="mt-8 pt-8 border-t border-border">
+              <GameCategorySelector
+                value={gameCategory}
+                onChange={(category) => setValue("game_category", category)}
+                disabled={isSubmitting}
+              />
+            </div>
+
+            {/* Login Method Selector */}
+            {gameCategory && (
+              <div className="mt-8">
+                <LoginMethodSelector
+                  value={loginMethod}
+                  onChange={(method) => {
+                    setValue("login_method", method);
+                    setShowSecurityGuide(true);
+                  }}
+                  disabled={isSubmitting}
+                />
+              </div>
+            )}
+
             {/* Buttons */}
-            <div className="flex gap-3 pt-4">
+            <div className="flex gap-3 pt-8">
               <button
                 type="submit"
                 disabled={isSubmitting}
@@ -368,15 +420,48 @@ export default function NewProductPage() {
               </div>
 
               {/* Status Badge */}
-              <div className="mt-6 pt-6 border-t border-border">
+              <div className="mt-6 pt-6 border-t border-border space-y-3">
                 <div className="inline-flex items-center gap-2 px-3 py-2 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
                   <div className="w-2 h-2 bg-blue-700 rounded-full"></div>
                   Status: {status === "active" ? "Aktif" : "Nonaktif"}
                 </div>
+
+                {/* Game Category Badge */}
+                {gameCategory && (
+                  <div className="block">
+                    <div className="inline-flex items-center gap-2 px-3 py-2 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                      Kategori: {gameCategory.replace(/_/g, " ").toUpperCase()}
+                    </div>
+                  </div>
+                )}
+
+                {/* Login Method Badge */}
+                {loginMethod && (
+                  <div className="block">
+                    <div className="inline-flex items-center gap-2 px-3 py-2 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                      Login: {loginMethod.replace(/_/g, " ").toUpperCase()}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
+
+        {/* Security Guide Section */}
+        {showSecurityGuide && loginMethod && (
+          <div className="mt-12 pt-12 border-t border-border">
+            <div className="mb-8">
+              <h2 className="text-section-heading text-text-primary mb-2">
+                Panduan Keamanan Akun
+              </h2>
+              <p className="text-text-secondary">
+                Pelajari praktik terbaik untuk melindungi akun Anda
+              </p>
+            </div>
+            <SecurityGuide method={loginMethod} />
+          </div>
+        )}
       </div>
     </div>
   );

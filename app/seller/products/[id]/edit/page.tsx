@@ -2,23 +2,46 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { FieldErrors, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
-import { Product, UpdateProductInput } from "@/types";
-import { LoadingSkeleton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components";
+import { GameCategory, LoginMethod, Product, UpdateProductInput } from "@/types";
+import { getProductMetadata, inferGameCategoryFromText, inferLoginMethodFromText, saveProductMetadata } from "@/lib/productMetadata";
+import { LoadingSkeleton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, GameCategorySelector, LoginMethodSelector, SecurityGuide } from "@/components";
 import { Upload, X, Image as ImageIcon } from "lucide-react";
 
+const optionalNumberField = (min: number, message: string) =>
+  z.preprocess(
+    (value) => {
+      if (value === "" || value === null || value === undefined) return undefined;
+      if (typeof value === "number" && Number.isNaN(value)) return undefined;
+      return value;
+    },
+    z.number().min(min, message).optional()
+  );
+
+const optionalStringField = (min: number, message: string) =>
+  z.preprocess(
+    (value) => {
+      if (typeof value !== "string") return value;
+      const trimmed = value.trim();
+      return trimmed === "" ? undefined : trimmed;
+    },
+    z.string().min(min, message).optional()
+  );
+
 const productSchema = z.object({
-  name: z.string().min(3, "Nama minimal 3 karakter").optional(),
-  description: z.string().min(10, "Deskripsi minimal 10 karakter").optional(),
-  price: z.number().min(1000, "Harga minimal Rp 1.000").optional(),
-  stock: z.number().min(0, "Stok tidak boleh negatif").optional(),
+  name: optionalStringField(3, "Nama minimal 3 karakter"),
+  description: optionalStringField(10, "Deskripsi minimal 10 karakter"),
+  price: optionalNumberField(1000, "Harga minimal Rp 1.000"),
+  stock: optionalNumberField(0, "Stok tidak boleh negatif"),
   image_url: z.string().optional().or(z.literal("")),
   status: z.enum(["active", "inactive"]).optional(),
-}).partial();
+  game_category: z.string().optional(),
+  login_method: z.string().optional(),
+});
 
 const fetcher = (url: string) => apiClient.get(url).then((res) => res.data.data);
 
@@ -30,6 +53,8 @@ export default function EditProductPage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [showSecurityGuide, setShowSecurityGuide] = useState(false);
+  const [isImageDirty, setIsImageDirty] = useState(false);
 
   const productId = params.id as string;
   const { data: product, isLoading } = useSWR<Product>(
@@ -43,6 +68,7 @@ export default function EditProductPage() {
     handleSubmit,
     watch,
     setValue,
+    reset,
     formState: { errors },
   } = useForm<UpdateProductInput>({
     resolver: zodResolver(productSchema),
@@ -52,6 +78,8 @@ export default function EditProductPage() {
   const name = watch("name");
   const price = watch("price");
   const stock = watch("stock");
+  const gameCategory = watch("game_category") as GameCategory | undefined;
+  const loginMethod = watch("login_method") as LoginMethod | undefined;
 
   // Handle file selection
   const handleFileSelect = (file: File) => {
@@ -70,6 +98,7 @@ export default function EditProductPage() {
       const imageUrl = e.target?.result as string;
       setImagePreview(imageUrl);
       setValue("image_url", imageUrl);
+      setIsImageDirty(true);
     };
     reader.readAsDataURL(file);
   };
@@ -99,6 +128,7 @@ export default function EditProductPage() {
   const handleClearImage = () => {
     setImagePreview(null);
     setValue("image_url", "");
+    setIsImageDirty(true);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -106,17 +136,32 @@ export default function EditProductPage() {
 
   useEffect(() => {
     if (product) {
-      setValue("name", product.name);
-      setValue("description", product.description);
-      setValue("price", product.price);
-      setValue("stock", product.stock);
-      setValue("image_url", product.image_url || "");
-      setValue("status", product.status);
+      const localMetadata = getProductMetadata(product.id);
+      const inferredGameCategory = inferGameCategoryFromText(`${product.name} ${product.description}`);
+      const inferredLoginMethod = inferLoginMethodFromText(`${product.name} ${product.description}`);
+
+      const resolvedGameCategory =
+        product.game_category ?? localMetadata?.game_category ?? inferredGameCategory;
+      const resolvedLoginMethod =
+        product.login_method ?? localMetadata?.login_method ?? inferredLoginMethod;
+
+      reset({
+        name: product.name,
+        description: product.description,
+        price: product.price,
+        stock: product.stock,
+        image_url: product.image_url || "",
+        status: product.status,
+        game_category: resolvedGameCategory,
+        login_method: resolvedLoginMethod,
+      });
+      setShowSecurityGuide(Boolean(resolvedLoginMethod));
       if (product.image_url) {
         setImagePreview(product.image_url);
       }
+      setIsImageDirty(false);
     }
-  }, [product, setValue]);
+  }, [product, reset]);
 
   if (isLoading) {
     return (
@@ -149,13 +194,43 @@ export default function EditProductPage() {
     setApiError(null);
 
     try {
-      await apiClient.put(`/products/${product.id}`, data);
+      const payload: UpdateProductInput = {
+        name: data.name,
+        description: data.description,
+        price: data.price,
+        stock: data.stock,
+        status: data.status,
+      };
+
+      if (isImageDirty) {
+        payload.image_url = data.image_url;
+      }
+
+      await apiClient.put(`/products/${product.id}`, payload);
+      saveProductMetadata(product.id, {
+        game_category: data.game_category ?? gameCategory,
+        login_method: data.login_method ?? loginMethod,
+      });
       router.push("/seller/products");
-    } catch (error: any) {
-      setApiError(error.response?.data?.message || "Gagal mengupdate produk");
+    } catch (error: unknown) {
+      if (error && typeof error === "object" && "response" in error) {
+        const axiosError = error as { response?: { data?: { message?: string } } };
+        setApiError(axiosError.response?.data?.message || "Gagal mengupdate produk");
+      } else {
+        setApiError("Gagal mengupdate produk");
+      }
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const onSubmitInvalid = (formErrors: FieldErrors<UpdateProductInput>) => {
+    const messages = collectErrorMessages(formErrors);
+    if (messages.length > 0) {
+      setApiError(`Form belum valid: ${messages.join(" | ")}`);
+      return;
+    }
+    setApiError("Form belum valid. Cek kembali field yang wajib dan format input.");
   };
 
   return (
@@ -179,7 +254,7 @@ export default function EditProductPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* Form */}
-          <form onSubmit={handleSubmit(onSubmit)} className="md:col-span-2 space-y-6">
+          <form onSubmit={handleSubmit(onSubmit, onSubmitInvalid)} className="md:col-span-2 space-y-6">
             {/* Name */}
             <div>
               <label htmlFor="name" className="block text-label text-text-primary mb-2">
@@ -308,8 +383,31 @@ export default function EditProductPage() {
               </Select>
             </div>
 
+            {/* Game Category Selector */}
+            <div className="mt-8 pt-8 border-t border-border">
+              <GameCategorySelector
+                value={gameCategory}
+                onChange={(category) => setValue("game_category", category)}
+                disabled={isSubmitting}
+              />
+            </div>
+
+            {/* Login Method Selector */}
+            {gameCategory && (
+              <div className="mt-8">
+                <LoginMethodSelector
+                  value={loginMethod}
+                  onChange={(method) => {
+                    setValue("login_method", method);
+                    setShowSecurityGuide(true);
+                  }}
+                  disabled={isSubmitting}
+                />
+              </div>
+            )}
+
             {/* Buttons */}
-            <div className="flex gap-3 pt-4">
+            <div className="flex gap-3 pt-8">
               <button
                 type="submit"
                 disabled={isSubmitting}
@@ -414,23 +512,67 @@ export default function EditProductPage() {
               </div>
 
               {/* Status Badge */}
-              <div className="mt-6 pt-6 border-t border-border">
+              <div className="mt-6 pt-6 border-t border-border space-y-3">
                 <div className="inline-flex items-center gap-2 px-3 py-2 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
                   <div className="w-2 h-2 bg-blue-700 rounded-full"></div>
                   Status: {status === "active" ? "Aktif" : "Nonaktif"}
                 </div>
-              </div>
-                <div>
-                  <p className="text-xs text-text-secondary mb-1">Stok</p>
-                  <p className="font-medium text-text-primary">
-                    {stock !== undefined && stock >= 0 ? `${stock} unit` : "-"}
-                  </p>
-                </div>
+
+                {/* Game Category Badge */}
+                {gameCategory && (
+                  <div className="block">
+                    <div className="inline-flex items-center gap-2 px-3 py-2 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                      Kategori: {gameCategory.replace(/_/g, " ").toUpperCase()}
+                    </div>
+                  </div>
+                )}
+
+                {/* Login Method Badge */}
+                {loginMethod && (
+                  <div className="block">
+                    <div className="inline-flex items-center gap-2 px-3 py-2 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                      Login: {loginMethod.replace(/_/g, " ").toUpperCase()}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
+
+        {/* Security Guide Section */}
+        {showSecurityGuide && loginMethod && (
+          <div className="mt-12 pt-12 border-t border-border">
+            <div className="mb-8">
+              <h2 className="text-section-heading text-text-primary mb-2">
+                Panduan Keamanan Akun
+              </h2>
+              <p className="text-text-secondary">
+                Pelajari praktik terbaik untuk melindungi akun Anda
+              </p>
+            </div>
+            <SecurityGuide method={loginMethod} />
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function collectErrorMessages(errors: FieldErrors<UpdateProductInput>): string[] {
+  const allMessages: string[] = [];
+
+  const walk = (node: unknown) => {
+    if (!node || typeof node !== "object") return;
+
+    const maybeMessage = (node as { message?: unknown }).message;
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) {
+      allMessages.push(maybeMessage);
+    }
+
+    Object.values(node as Record<string, unknown>).forEach(walk);
+  };
+
+  walk(errors);
+  return Array.from(new Set(allMessages));
 }

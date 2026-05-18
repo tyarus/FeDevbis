@@ -21,6 +21,8 @@ export interface Product {
   stock: number;
   image_url?: string;
   status: "active" | "inactive";
+  game_category?: GameCategory;
+  login_method?: LoginMethod;
   created_at: string;
   updated_at: string;
 }
@@ -32,6 +34,8 @@ export interface CreateProductInput {
   stock: number;
   image_url?: string;
   status: "active" | "inactive";
+  game_category?: GameCategory;
+  login_method?: LoginMethod;
 }
 
 export interface UpdateProductInput {
@@ -41,6 +45,8 @@ export interface UpdateProductInput {
   stock?: number;
   image_url?: string;
   status?: "active" | "inactive";
+  game_category?: GameCategory;
+  login_method?: LoginMethod;
 }
 
 // Order types
@@ -130,4 +136,46 @@ export interface PaginatedResponse<T> {
 export interface ApiError {
   message: string;
   errors?: Record<string, string[]>;
+}
+
+// Game Category types
+export type GameCategory = 
+  | "mobile_legends"
+  | "pubg_mobile"
+  | "free_fire"
+  | "efootball"
+  | "fifa_26";
+
+export interface GameCategoryOption {
+  id: GameCategory;
+  name: string;
+  icon: string;
+  image: string;
+  description: string;
+  color: string;
+}
+
+// Login Method types
+export type LoginMethod = 
+  | "facebook"
+  | "google"
+  | "x"
+  | "konami_id"
+  | "ea";
+
+export interface LoginMethodOption {
+  id: LoginMethod;
+  name: string;
+  icon: string;
+  color: string;
+}
+
+export interface SecurityGuide {
+  title: string;
+  tips: string[];
+  warnings: string[];
+  resources: {
+    label: string;
+    url: string;
+  }[];
 }

@@ -7,7 +7,9 @@ import useSWR from "swr";
 import { apiClient } from "@/lib/api";
 import { Product } from "@/types";
 import { useAuthStore } from "@/store/authStore";
-import { LoadingSkeleton, PriceDisplay } from "@/components";
+import { LoadingSkeleton, PriceDisplay, SecurityGuide } from "@/components";
+import { GAME_CATEGORIES, LOGIN_METHODS } from "@/lib/gameData";
+import { getProductMetadata, inferGameCategoryFromText, inferLoginMethodFromText } from "@/lib/productMetadata";
 import { Heart } from "lucide-react";
 
 const fetcher = (url: string) => apiClient.get(url).then((res) => res.data.data);
@@ -57,7 +59,23 @@ export default function ProductDetailPage() {
   }
 
   const isAvailable = product.stock > 0;
-  const maxQuantity = Math.min(quantity + 9, product.stock);
+  const localMetadata = getProductMetadata(product.id);
+  const inferredGameCategory =
+    inferGameCategoryFromText(`${product.name} ${product.description}`);
+  const inferredLoginMethod =
+    inferLoginMethodFromText(`${product.name} ${product.description}`);
+
+  const resolvedGameCategoryId =
+    product.game_category ?? localMetadata?.game_category ?? inferredGameCategory;
+  const resolvedLoginMethodId =
+    product.login_method ?? localMetadata?.login_method ?? inferredLoginMethod;
+
+  const selectedGameCategory = resolvedGameCategoryId
+    ? GAME_CATEGORIES.find((category) => category.id === resolvedGameCategoryId)
+    : null;
+  const selectedLoginMethod = resolvedLoginMethodId
+    ? LOGIN_METHODS.find((method) => method.id === resolvedLoginMethodId)
+    : null;
 
   const handleBuyClick = () => {
     if (!user) {
@@ -103,7 +121,7 @@ export default function ProductDetailPage() {
           </div>
 
           {/* Right: Details */}
-          <div className="flex flex-col justify-center">
+          <div className="flex flex-col justify-start">
             <h1 className="text-2xl font-medium text-text-primary mb-4">{product.name}</h1>
 
             <div className="mb-6">
@@ -122,6 +140,30 @@ export default function ProductDetailPage() {
             <p className="text-body text-text-secondary mb-8 leading-relaxed">
               {product.description}
             </p>
+
+            <div className="mb-8 space-y-4">
+              <div className="p-4 bg-white border border-border rounded-input">
+                <h2 className="text-sm font-semibold text-text-primary mb-3">
+                  Informasi Akun Game
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-bg-secondary border border-border">
+                    <p className="text-xs text-text-secondary mb-1">Kategori Game</p>
+                    <p className="text-sm font-semibold text-text-primary">
+                      {selectedGameCategory?.name ?? "Belum diisi oleh penjual"}
+                    </p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-bg-secondary border border-border">
+                    <p className="text-xs text-text-secondary mb-1">Metode Login</p>
+                    <p className="text-sm font-semibold text-text-primary">
+                      {selectedLoginMethod?.name ?? "Belum diisi oleh penjual"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <SecurityGuide method={selectedLoginMethod?.id} compact />
+            </div>
 
             {/* Quantity and Buy Button - Only for Buyers */}
             {user?.role === "buyer" && (

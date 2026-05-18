@@ -11,3 +11,6 @@ export { PaymentSuccessModal } from "./PaymentSuccessModal";
 export { NotificationBell, NotificationItem, NotificationContainer } from "./Notification";
 export { NotificationDropdown } from "./NotificationDropdown";
 export { TrackingCodeVerification } from "./TrackingCodeVerification";
+export { GameCategorySelector } from "./GameCategorySelector";
+export { LoginMethodSelector } from "./LoginMethodSelector";
+export { SecurityGuide } from "./SecurityGuide";
