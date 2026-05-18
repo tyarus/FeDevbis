@@ -98,7 +98,7 @@ export default function ProductDetailPage() {
           onClick={() => router.back()}
           className="text-xs text-text-secondary hover:text-text-primary mb-8"
         >
-          ← Kembali
+          {"<-"} Kembali
         </button>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12">

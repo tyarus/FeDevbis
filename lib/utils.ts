@@ -70,6 +70,38 @@ export function getOrderStatusColor(status: string): {
   return colors[status] || { bg: "bg-bg-secondary", text: "text-text-secondary" };
 }
 
+export function getTransactionStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    chat_open: "Chat Dibuka",
+    account_verification: "Verifikasi Akun",
+    account_secured: "Akun Diamankan",
+    device_cleanup: "Pembersihan Perangkat",
+    awaiting_completion_code: "Menunggu Kode Selesai",
+    completed: "Transaksi Selesai",
+    disputed: "Sengketa",
+  };
+
+  return labels[status] || status;
+}
+
+export function getTransactionStatusColor(status: string): {
+  bg: string;
+  text: string;
+  border: string;
+} {
+  const colors: Record<string, { bg: string; text: string; border: string }> = {
+    chat_open: { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200" },
+    account_verification: { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200" },
+    account_secured: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
+    device_cleanup: { bg: "bg-teal-50", text: "text-teal-700", border: "border-teal-200" },
+    awaiting_completion_code: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
+    completed: { bg: "bg-green-50", text: "text-green-700", border: "border-green-200" },
+    disputed: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200" },
+  };
+
+  return colors[status] || { bg: "bg-bg-secondary", text: "text-text-secondary", border: "border-border" };
+}
+
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

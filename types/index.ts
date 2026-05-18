@@ -60,6 +60,90 @@ export type OrderStatus =
   | "cancelled"
   | "refunded";
 
+export type TransactionStatus =
+  | "chat_open"
+  | "account_verification"
+  | "account_secured"
+  | "device_cleanup"
+  | "awaiting_completion_code"
+  | "completed"
+  | "disputed";
+
+export type TransactionParticipantRole = "buyer" | "seller" | "admin" | "system";
+
+export type TransactionMessageType =
+  | "text"
+  | "system"
+  | "checklist_update"
+  | "status_update"
+  | "completion_code";
+
+export interface TransactionChecklist {
+  account_match: boolean;
+  account_secured: boolean;
+  seller_device_removed: boolean;
+  completion_code_verified: boolean;
+}
+
+export interface TransactionChatMessage {
+  id: string;
+  order_id: string;
+  sender_id: string;
+  sender_role: TransactionParticipantRole;
+  message: string;
+  message_type: TransactionMessageType;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at?: string;
+  sender?: User;
+}
+
+export interface TransactionActivity {
+  id: string;
+  order_id: string;
+  actor_id?: string;
+  actor_role: TransactionParticipantRole;
+  action: string;
+  description: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface TransactionChatData {
+  order_id: string;
+  status: TransactionStatus;
+  checklist: TransactionChecklist;
+  completion_code?: string | null;
+  completion_code_expires_at?: string | null;
+  completion_code_verified_at?: string | null;
+  participants?: User[];
+  messages: TransactionChatMessage[];
+  activities: TransactionActivity[];
+  updated_at?: string;
+}
+
+export interface TransactionChatMessageInput {
+  message: string;
+  message_type?: TransactionMessageType;
+}
+
+export interface TransactionChecklistUpdateInput {
+  account_match?: boolean;
+  account_secured?: boolean;
+  seller_device_removed?: boolean;
+}
+
+export interface TransactionCompletionCodeResponse {
+  completion_code: string;
+  expires_at?: string | null;
+}
+
+export interface TransactionCompletionCodeVerifyResponse {
+  verified: boolean;
+  status?: TransactionStatus;
+  verified_at?: string | null;
+}
+
 export interface Order {
   id: string;
   buyer_id: string;
@@ -71,6 +155,7 @@ export interface Order {
   quantity: number;
   total_price: number;
   status: OrderStatus;
+  transaction_status?: TransactionStatus;
   tracking_number?: string;
   payment_method?: string;
   payment_id?: string;

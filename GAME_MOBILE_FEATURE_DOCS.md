@@ -5,6 +5,7 @@
 Pada halaman **Tambah Produk Baru** (`/seller/products/new`), seller kini dapat memilih kategori game yang tersedia:
 
 ### Game Categories yang Didukung:
+
 1. **Mobile Legends** ⚔️
    - Battle royale dan MOBA terpopuler
    - Gradient: Blue → Purple
@@ -32,6 +33,7 @@ Pada halaman **Tambah Produk Baru** (`/seller/products/new`), seller kini dapat 
 Setelah memilih kategori game, seller dapat memilih metode login yang akan ditawarkan kepada pembeli.
 
 ### Login Methods yang Didukung:
+
 1. **Facebook** (Gradient: Blue)
 2. **Google** (Gradient: Red)
 3. **X (Twitter)** (Gradient: Gray)
@@ -45,6 +47,7 @@ Setelah memilih kategori game, seller dapat memilih metode login yang akan ditaw
 Setiap metode login memiliki panduan keamanan unik yang menampilkan:
 
 ### Struktur Panduan Keamanan:
+
 1. **Header** - Judul dan deskripsi platform
 2. **Tips Keamanan** (✓) - Praktik terbaik untuk keamanan akun
 3. **Hal yang Harus Dihindari** (⚠) - Warning dan pitfalls umum
@@ -52,6 +55,7 @@ Setiap metode login memiliki panduan keamanan unik yang menampilkan:
 5. **Tips Tambahan** - Reminder tentang 2FA dan password management
 
 ### Contoh Panduan: Facebook
+
 - ✓ Tips: Aktifkan 2FA, gunakan password kuat, periksa perangkat terhubung
 - ⚠ Hindari: Jangan bagikan password, hindari phishing, jangan setuju app tak dipercaya
 - 📚 Resources: Pusat Keamanan Facebook, Panduan 2FA Facebook
@@ -61,6 +65,7 @@ Setiap metode login memiliki panduan keamanan unik yang menampilkan:
 ## 🎨 User Interface
 
 ### Game Category Selector
+
 ```
 ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
 │   ⚔️             │  │   🎖️             │  │   🔥             │
@@ -72,6 +77,7 @@ Setiap metode login memiliki panduan keamanan unik yang menampilkan:
 ```
 
 ### Login Method Selector
+
 ```
 ┌────┐  ┌────┐  ┌────┐  ┌────┐  ┌────┐
 │ f  │  │ G  │  │ 𝕏  │  │ K  │  │EA  │
@@ -82,6 +88,7 @@ Setiap metode login memiliki panduan keamanan unik yang menampilkan:
 ```
 
 ### Security Guide Display
+
 ```
 🔐 Panduan Keamanan Akun Facebook
 
@@ -107,20 +114,16 @@ Setiap metode login memiliki panduan keamanan unik yang menampilkan:
 ## 📊 Data Structure
 
 ### Types
+
 ```typescript
-type GameCategory = 
+type GameCategory =
   | "mobile_legends"
   | "pubg_mobile"
   | "free_fire"
   | "efootball"
   | "fifa_26";
 
-type LoginMethod = 
-  | "facebook"
-  | "google"
-  | "x"
-  | "konami_id"
-  | "ea";
+type LoginMethod = "facebook" | "google" | "x" | "konami_id" | "ea";
 
 interface Product {
   // ... existing fields
@@ -169,11 +172,13 @@ app/seller/products/new/
 ## 💡 Fitur Highlight
 
 ### Dynamic & Responsive
+
 - Selector hanya muncul jika kondisi sebelumnya terpenuhi
 - Security guide muncul dinamis saat login method dipilih
 - Responsive design untuk mobile dan desktop
 
 ### Modern & User-Friendly
+
 - Emoji icons untuk visual appeal
 - Gradient backgrounds untuk setiap game
 - Hover effects dan smooth transitions
@@ -181,12 +186,14 @@ app/seller/products/new/
 - Color-coded sections untuk organization
 
 ### Comprehensive Security
+
 - 5 panduan keamanan lengkap per login method
 - Tips, warnings, dan resources untuk setiap platform
 - Link ke official security resources
 - Reminder tentang 2FA dan best practices
 
 ### Data-Driven
+
 - Centralized data di `gameData.ts` untuk mudah update
 - Type-safe dengan TypeScript
 - Mudah untuk extend dengan game/platform baru
@@ -196,6 +203,7 @@ app/seller/products/new/
 ## 🚀 Cara Extend
 
 ### Menambah Game Baru:
+
 ```typescript
 // lib/gameData.ts
 export const GAME_CATEGORIES: GameCategoryOption[] = [
@@ -210,13 +218,14 @@ export const GAME_CATEGORIES: GameCategoryOption[] = [
 ];
 
 // types/index.ts
-type GameCategory = 
+type GameCategory =
   | "mobile_legends"
   | // ... existing
   | "new_game";
 ```
 
 ### Menambah Login Method Baru:
+
 ```typescript
 // lib/gameData.ts
 export const LOGIN_METHODS: LoginMethodOption[] = [
@@ -241,7 +250,7 @@ export const SECURITY_GUIDES = {
 };
 
 // types/index.ts
-type LoginMethod = 
+type LoginMethod =
   | "facebook"
   | // ... existing
   | "new_platform";

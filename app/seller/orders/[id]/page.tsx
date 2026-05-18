@@ -4,35 +4,38 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
-import { Order } from "@/types";
-import { OrderStatusBadge, OrderTimeline, LoadingSkeleton, ConfirmDialog } from "@/components";
+import { Order, TransactionChatData } from "@/types";
+import { transactionChatAPI } from "@/lib/transactionChat";
+import { OrderStatusBadge, OrderTimeline, LoadingSkeleton, TransactionStatusBadge } from "@/components";
 import { formatRupiah, formatDate, formatDateShort } from "@/lib/utils";
-import { Truck } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 
 const fetcher = (url: string) => apiClient.get(url).then((res) => res.data.data);
 
 export default function SellerOrderDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const [trackingNumber, setTrackingNumber] = useState("");
-  const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const orderId = params.id as string;
-  const { data: order, isLoading, mutate } = useSWR<Order>(
+  const { data: order, isLoading } = useSWR<Order>(
     `/orders/${orderId}`,
     fetcher,
     { revalidateOnFocus: false }
   );
+  const { data: thread } = useSWR<TransactionChatData>(
+    orderId ? `order-thread-status-${orderId}` : null,
+    () => transactionChatAPI.getThread(orderId),
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      refreshInterval: 5000,
+    }
+  );
 
   useEffect(() => {
     setIsMounted(true);
-    if (order?.tracking_number) {
-      setTrackingNumber(order.tracking_number);
-    }
-  }, [order]);
+  }, []);
 
   if (!isMounted || isLoading) {
     return (
@@ -60,32 +63,20 @@ export default function SellerOrderDetailPage() {
     );
   }
 
-  const handleShip = async () => {
-    if (!trackingNumber.trim()) {
-      setError("Nomor tracking harus diisi");
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-
-    try {
-      await apiClient.put(`/seller/orders/${order.id}/ship`, {
-        tracking_number: trackingNumber,
-      });
-      await mutate();
-      setIsConfirmDialogOpen(false);
-    } catch (err: any) {
-      setError(err.response?.data?.message || "Gagal mengirim pesanan");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const canShip = order.status === "paid" || order.status === "processing";
-  const isShippedToBuyer = order.status === "shipped" || order.status === "delivered";
-  const sellerStatusMessage =
-    "Pesanan sudah dikirim. Buyer sekarang bisa langsung konfirmasi penerimaan agar pesanan selesai dan dana di-release ke seller.";
+  const canOpenTransaction = ["paid", "processing", "shipped", "delivered", "completed"].includes(order.status);
+  const threadChecklistDone = Boolean(
+    thread?.checklist?.account_match &&
+      thread?.checklist?.account_secured &&
+      thread?.checklist?.seller_device_removed &&
+      thread?.checklist?.completion_code_verified
+  );
+  const transactionStatusRaw = thread?.status || order.transaction_status || "chat_open";
+  const transactionStatus = threadChecklistDone ? "completed" : transactionStatusRaw;
+  const effectiveOrderStatus = transactionStatus === "completed" ? "completed" : order.status;
+  const timelineOrder: Order =
+    effectiveOrderStatus === "completed"
+      ? { ...order, status: "completed", transaction_status: "completed" }
+      : order;
 
   return (
     <div className="section-padding">
@@ -105,7 +96,10 @@ export default function SellerOrderDetailPage() {
                   <p className="text-xs text-text-secondary mb-1">Nomor Pesanan</p>
                   <h1 className="text-lg font-medium text-text-primary">#{order.id}</h1>
                 </div>
-                <OrderStatusBadge status={order.status} />
+                <div className="flex flex-col items-end gap-2">
+                  <OrderStatusBadge status={effectiveOrderStatus} />
+                  {canOpenTransaction && <TransactionStatusBadge status={transactionStatus} size="sm" />}
+                </div>
               </div>
               <p className="text-xs text-text-secondary">
                 Dibuat pada {formatDate(order.created_at)}
@@ -144,61 +138,9 @@ export default function SellerOrderDetailPage() {
               </div>
             </div>
 
-            {isShippedToBuyer && (
-              <div className="card-border p-6 mb-6 bg-green-50 border-green-200">
-                <p className="text-sm text-green-700">
-                  {sellerStatusMessage}
-                </p>
-              </div>
-            )}
-
-            {canShip && (
-              <div className="card-border p-6 mb-6">
-                <h2 className="text-base font-medium text-text-primary mb-4">Kirim Pesanan</h2>
-
-                {error && (
-                  <div className="mb-4 p-4 bg-accent-error/10 border border-accent-error rounded-input text-accent-error text-sm">
-                    {error}
-                  </div>
-                )}
-
-                <div>
-                  <label htmlFor="tracking" className="block text-label text-text-primary mb-2">
-                    Nomor Tracking
-                  </label>
-                  <input
-                    type="text"
-                    value={trackingNumber}
-                    onChange={(e) => setTrackingNumber(e.target.value)}
-                    placeholder="Masukkan nomor tracking pengiriman"
-                    className="input-base w-full text-body mb-4"
-                  />
-                  <button
-                    onClick={() => setIsConfirmDialogOpen(true)}
-                    className="btn-primary text-xs flex items-center gap-2"
-                  >
-                    <Truck size={16} />
-                    Konfirmasi Pengiriman
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {order.tracking_number && (
-              <div className="card-border p-6 mb-6">
-                <h2 className="text-base font-medium text-text-primary mb-3">Informasi Pengiriman</h2>
-                <div className="space-y-2">
-                  <div>
-                    <p className="text-xs text-text-secondary mb-1">Nomor Tracking</p>
-                    <p className="font-medium text-text-primary">{order.tracking_number}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="card-border p-6">
               <h2 className="text-base font-medium text-text-primary mb-4">Timeline Pesanan</h2>
-              <OrderTimeline order={order} />
+              <OrderTimeline order={timelineOrder} />
             </div>
           </div>
 
@@ -209,7 +151,7 @@ export default function SellerOrderDetailPage() {
               <div className="space-y-4 pb-6 border-b border-border">
                 <div>
                   <p className="text-xs text-text-secondary mb-1">Status</p>
-                  <OrderStatusBadge status={order.status} />
+                  <OrderStatusBadge status={effectiveOrderStatus} />
                 </div>
                 <div>
                   <p className="text-xs text-text-secondary mb-1">Jumlah Item</p>
@@ -227,30 +169,18 @@ export default function SellerOrderDetailPage() {
                 </div>
               </div>
 
-              {canShip && (
-                <div className="mt-4 p-3 bg-blue-50 border border-accent-primary rounded-input text-xs text-accent-primary">
-                  Mohon masukkan nomor tracking untuk mengirim pesanan ini kepada pembeli.
-                </div>
-              )}
-
-              {isShippedToBuyer && (
-                <div className="mt-4 p-3 bg-green-50 border border-green-300 rounded-input text-xs text-green-700">
-                  {sellerStatusMessage}
-                </div>
+              {canOpenTransaction && (
+                <button
+                  onClick={() => router.push(`/seller/orders/${order.id}/transaction`)}
+                  className="btn-secondary w-full mt-4 text-xs flex items-center justify-center gap-2"
+                >
+                  <MessageCircle size={15} />
+                  Buka Chat Transaksi
+                </button>
               )}
             </div>
           </div>
         </div>
-
-        <ConfirmDialog
-          open={isConfirmDialogOpen}
-          onOpenChange={setIsConfirmDialogOpen}
-          title="Konfirmasi Pengiriman"
-          description="Pastikan nomor tracking sudah benar sebelum mengirim. Buyer akan menerima notifikasi."
-          onConfirm={handleShip}
-          confirmLabel="Kirim Pesanan"
-          isLoading={isSubmitting}
-        />
       </div>
     </div>
   );

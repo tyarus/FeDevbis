@@ -96,6 +96,8 @@ export default function PaymentPage() {
   }
 
   if (order.status !== "pending_payment") {
+    const canOpenTransaction = ["paid", "processing", "shipped", "delivered", "completed"].includes(order.status);
+
     return (
       <div className="section-padding text-center">
         <div className="max-content">
@@ -103,12 +105,22 @@ export default function PaymentPage() {
           <p className="text-body text-text-secondary mb-6">
             Pesanan ini sudah dibayar atau tidak memerlukan pembayaran.
           </p>
-          <button
-            onClick={() => router.push(`/orders/${order.id}`)}
-            className="btn-secondary text-xs"
-          >
-            Lihat Pesanan
-          </button>
+          <div className="flex flex-wrap justify-center gap-3">
+            <button
+              onClick={() => router.push(`/orders/${order.id}`)}
+              className="btn-secondary text-xs"
+            >
+              Lihat Pesanan
+            </button>
+            {canOpenTransaction && (
+              <button
+                onClick={() => router.push(`/orders/${order.id}/transaction`)}
+                className="btn-primary text-xs"
+              >
+                Buka Chat Transaksi
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -125,7 +137,7 @@ export default function PaymentPage() {
 
       setShowSuccess(true);
       setTimeout(() => {
-        router.push(`/orders/${order.id}`);
+        router.push(`/orders/${order.id}/transaction`);
       }, 3000);
     } catch (err: any) {
       setError(err.response?.data?.message || "Pembayaran gagal");
@@ -139,7 +151,7 @@ export default function PaymentPage() {
         <PaymentSuccessModal
           orderId={order.id}
           amount={order.total_price}
-          onClose={() => router.push(`/orders/${order.id}`)}
+          onClose={() => router.push(`/orders/${order.id}/transaction`)}
         />
       )}
       <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">

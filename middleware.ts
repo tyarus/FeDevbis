@@ -23,7 +23,7 @@ export function middleware(request: NextRequest) {
   // Protected routes for sellers only
   const sellerRoutes = ["/seller/dashboard", "/seller/products", "/seller/orders"];
   // Protected routes for buyers only
-  const buyerRoutes = ["/dashboard", "/checkout", "/payment"];
+  const buyerRoutes = ["/dashboard", "/checkout", "/payment", "/orders"];
   const protectedRoutes = [...sellerRoutes, ...buyerRoutes];
 
   // If accessing protected route without token

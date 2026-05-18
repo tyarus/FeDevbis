@@ -640,3 +640,148 @@ Jalankan seed:
 php artisan migrate:fresh --seed
 ```
 
+## 13) Transaction Chat + Fraud Tracking (NEW)
+
+Fitur frontend transaksi game sekarang membutuhkan endpoint tambahan agar chat, checklist, dan aktivitas audit tersimpan di database.
+
+### Endpoint yang Dibutuhkan (Protected)
+
+- `GET /api/orders/{id}/transaction-chat`
+- `POST /api/orders/{id}/transaction-chat/messages`
+- `PUT /api/orders/{id}/transaction-chat/checklist` (atau `PATCH`)
+- `PUT /api/orders/{id}/transaction-chat/status` (atau `PATCH`)
+- `POST /api/orders/{id}/transaction-chat/completion-code`
+- `POST /api/orders/{id}/transaction-chat/verify-completion-code`
+
+### Payload yang Digunakan Frontend
+
+#### `POST /messages`
+
+```json
+{
+  "message": "Akun sudah saya cek, datanya sesuai.",
+  "message_type": "text"
+}
+```
+
+`message_type` valid:
+- `text`
+- `system`
+- `checklist_update`
+- `status_update`
+- `completion_code`
+
+#### `PUT/PATCH /checklist`
+
+```json
+{
+  "account_match": true,
+  "account_secured": true,
+  "seller_device_removed": false
+}
+```
+
+Checklist final yang frontend tampilkan:
+- `account_match`
+- `account_secured`
+- `seller_device_removed`
+- `completion_code_verified` (di-set backend setelah verify code sukses)
+
+#### `PUT/PATCH /status`
+
+```json
+{
+  "status": "account_verification"
+}
+```
+
+`status` valid:
+- `chat_open`
+- `account_verification`
+- `account_secured`
+- `device_cleanup`
+- `awaiting_completion_code`
+- `completed`
+- `disputed`
+
+#### `POST /completion-code`
+
+Request body: none
+
+Success `200/201`:
+
+```json
+{
+  "success": true,
+  "message": "Kode penyelesaian berhasil dibuat",
+  "data": {
+    "completion_code": "FIN-238714",
+    "expires_at": "2026-05-19T10:00:00.000000Z"
+  }
+}
+```
+
+#### `POST /verify-completion-code`
+
+```json
+{
+  "code": "FIN-238714"
+}
+```
+
+Success `200`:
+
+```json
+{
+  "success": true,
+  "message": "Kode valid",
+  "data": {
+    "verified": true,
+    "status": "completed",
+    "verified_at": "2026-05-19T10:10:00.000000Z"
+  }
+}
+```
+
+### Response Minimum untuk `GET /transaction-chat`
+
+```json
+{
+  "success": true,
+  "message": "Data transaksi chat berhasil diambil",
+  "data": {
+    "order_id": 1,
+    "status": "chat_open",
+    "checklist": {
+      "account_match": false,
+      "account_secured": false,
+      "seller_device_removed": false,
+      "completion_code_verified": false
+    },
+    "completion_code": null,
+    "completion_code_expires_at": null,
+    "completion_code_verified_at": null,
+    "messages": [],
+    "activities": [],
+    "updated_at": "2026-05-18T12:00:00.000000Z"
+  }
+}
+```
+
+### Saran Struktur Tabel Database
+
+- `order_transaction_chats`
+  - `id`, `order_id`, `status`, `completion_code_hash`, `completion_code_expires_at`, `completion_code_verified_at`, `created_at`, `updated_at`
+- `order_transaction_checklists`
+  - `id`, `order_id`, `account_match`, `account_secured`, `seller_device_removed`, `completion_code_verified`, `updated_by`, `updated_at`
+- `order_transaction_messages`
+  - `id`, `order_id`, `sender_id`, `sender_role`, `message`, `message_type`, `metadata(json)`, `created_at`
+- `order_transaction_activities`
+  - `id`, `order_id`, `actor_id`, `actor_role`, `action`, `description`, `metadata(json)`, `created_at`
+
+### Catatan Keamanan dan Anti-Fraud
+
+- Simpan semua activity log immutable (append-only) agar valid sebagai bukti.
+- Hash completion code di DB (`completion_code_hash`), jangan simpan raw code.
+- Tambahkan `ip_address` dan `user_agent` di activity log untuk investigasi admin.
+- Batasi percobaan verify code (rate limit + lock sementara).

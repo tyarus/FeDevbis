@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
-import { Order, PaginatedResponse } from "@/types";
-import { OrderStatusBadge, LoadingSkeleton, EmptyState } from "@/components";
+import { transactionChatAPI } from "@/lib/transactionChat";
+import { Order, PaginatedResponse, TransactionStatus } from "@/types";
+import { OrderStatusBadge, LoadingSkeleton, EmptyState, TransactionStatusBadge } from "@/components";
 import { formatRupiah, formatDateShort, formatShortId } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, ShoppingBag } from "lucide-react";
 
@@ -44,24 +45,19 @@ const fetchAllSellerOrders = async (): Promise<Order[]> => {
   return allOrders;
 };
 
-const matchesStatusFilter = (orderStatus: string, statusFilter: string | null): boolean => {
+const matchesStatusFilter = (effectiveStatus: Order["status"], statusFilter: string | null): boolean => {
   if (!statusFilter) return true;
 
   if (statusFilter === "shipped") {
-    return orderStatus === "shipped" || orderStatus === "delivered";
+    return effectiveStatus === "shipped" || effectiveStatus === "delivered";
   }
 
-  return orderStatus === statusFilter;
+  return effectiveStatus === statusFilter;
 };
 
 export default function SellerOrdersPage() {
-  const [isMounted, setIsMounted] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
-
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
 
   const { data: allOrders, isLoading } = useSWR<Order[]>(
     "seller-orders-all",
@@ -69,20 +65,73 @@ export default function SellerOrdersPage() {
     { revalidateOnFocus: false, revalidateOnMount: true }
   );
 
+  const orderIdsKey = useMemo(
+    () =>
+      (allOrders || [])
+        .map((order) => String(order.id))
+        .sort()
+        .join(","),
+    [allOrders]
+  );
+
+  const { data: threadStatusMap } = useSWR<Record<string, TransactionStatus>>(
+    orderIdsKey ? `seller-orders-thread-status:${orderIdsKey}` : null,
+    async () => {
+      const entries = await Promise.all(
+        (allOrders || []).map(async (order) => {
+          try {
+            const thread = await transactionChatAPI.getThread(String(order.id));
+            const checklistDone = Boolean(
+              thread.checklist.account_match &&
+                thread.checklist.account_secured &&
+                thread.checklist.seller_device_removed &&
+                thread.checklist.completion_code_verified
+            );
+            const status = checklistDone ? "completed" : thread.status;
+            return [String(order.id), status] as const;
+          } catch {
+            return [String(order.id), order.transaction_status || "chat_open"] as const;
+          }
+        })
+      );
+
+      return Object.fromEntries(entries);
+    },
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      refreshInterval: 6000,
+    }
+  );
+
+  const getTransactionStatus = useCallback(
+    (order: Order): TransactionStatus | undefined => {
+      const mappedStatus = threadStatusMap?.[String(order.id)];
+      return mappedStatus || order.transaction_status;
+    },
+    [threadStatusMap]
+  );
+
+  const getEffectiveStatus = useCallback(
+    (order: Order): Order["status"] => {
+      const transactionStatus = getTransactionStatus(order);
+      return transactionStatus === "completed" ? "completed" : order.status;
+    },
+    [getTransactionStatus]
+  );
+
   const filteredOrders = useMemo(() => {
     const sortedOrders = [...(allOrders || [])].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
-    return sortedOrders.filter((order) => matchesStatusFilter(order.status, statusFilter));
-  }, [allOrders, statusFilter]);
+    return sortedOrders.filter((order) => matchesStatusFilter(getEffectiveStatus(order), statusFilter));
+  }, [allOrders, statusFilter, getEffectiveStatus]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / ITEMS_PER_PAGE));
   const activePage = Math.min(currentPage, totalPages);
   const startIndex = (activePage - 1) * ITEMS_PER_PAGE;
   const orders = filteredOrders.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-
-  if (!isMounted) return null;
 
   const statuses = [
     { value: null, label: "Semua" },
@@ -151,39 +200,49 @@ export default function SellerOrdersPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {orders.map((order) => (
-                      <tr
-                        key={order.id}
-                        className="border-b border-border hover:bg-bg-secondary transition-colors"
-                      >
-                        <td className="px-6 py-3 text-xs font-medium text-text-primary">
-                          #{formatShortId(order.id)}
-                        </td>
-                        <td className="px-6 py-3 text-xs text-text-primary">
-                          {order.buyer?.name || "Pembeli Anonim"}
-                        </td>
-                        <td className="px-6 py-3 text-xs text-text-primary">
-                          {order.product?.name || "Produk tidak tersedia"}
-                        </td>
-                        <td className="px-6 py-3 text-xs font-medium text-text-primary">
-                          {formatRupiah(order.total_price)}
-                        </td>
-                        <td className="px-6 py-3">
-                          <OrderStatusBadge status={order.status} size="sm" />
-                        </td>
-                        <td className="px-6 py-3 text-xs text-text-secondary">
-                          {formatDateShort(order.created_at)}
-                        </td>
-                        <td className="px-6 py-3">
-                          <Link
-                            href={`/seller/orders/${order.id}`}
-                            className="text-xs text-accent-primary hover:underline font-medium"
-                          >
-                            Lihat Detail
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
+                    {orders.map((order) => {
+                      const effectiveStatus = getEffectiveStatus(order);
+                      const transactionStatus = getTransactionStatus(order);
+
+                      return (
+                        <tr
+                          key={order.id}
+                          className="border-b border-border hover:bg-bg-secondary transition-colors"
+                        >
+                          <td className="px-6 py-3 text-xs font-medium text-text-primary">
+                            #{formatShortId(order.id)}
+                          </td>
+                          <td className="px-6 py-3 text-xs text-text-primary">
+                            {order.buyer?.name || "Pembeli Anonim"}
+                          </td>
+                          <td className="px-6 py-3 text-xs text-text-primary">
+                            {order.product?.name || "Produk tidak tersedia"}
+                          </td>
+                          <td className="px-6 py-3 text-xs font-medium text-text-primary">
+                            {formatRupiah(order.total_price)}
+                          </td>
+                          <td className="px-6 py-3">
+                            <div className="flex flex-col items-start gap-1.5">
+                              <OrderStatusBadge status={effectiveStatus} size="sm" />
+                              {transactionStatus && (
+                                <TransactionStatusBadge status={transactionStatus} size="sm" />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-3 text-xs text-text-secondary">
+                            {formatDateShort(order.created_at)}
+                          </td>
+                          <td className="px-6 py-3">
+                            <Link
+                              href={`/seller/orders/${order.id}`}
+                              className="text-xs text-accent-primary hover:underline font-medium"
+                            >
+                              Lihat Detail
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

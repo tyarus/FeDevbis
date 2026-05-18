@@ -3,34 +3,42 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import useSWR from "swr";
-import { AxiosError } from "axios";
 import { apiClient } from "@/lib/api";
-import { Order } from "@/types";
+import { Order, TransactionChatData } from "@/types";
+import { transactionChatAPI } from "@/lib/transactionChat";
 import {
   OrderStatusBadge,
+  TransactionStatusBadge,
   OrderTimeline,
   LoadingSkeleton,
   ConfirmDialog,
-  TrackingCodeVerification,
 } from "@/components";
 import { formatRupiah, formatDate, formatDateShort } from "@/lib/utils";
-import { Truck, AlertCircle, CheckCircle2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, MessageCircle } from "lucide-react";
 
 const fetcher = (url: string) => apiClient.get(url).then((res) => res.data.data);
 
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<"confirm" | "cancel" | null>(null);
 
   const orderId = params.id as string;
   const { data: order, isLoading, mutate } = useSWR<Order>(
     `/orders/${orderId}`,
     fetcher,
     { revalidateOnFocus: false }
+  );
+  const { data: thread } = useSWR<TransactionChatData>(
+    orderId ? `order-thread-status-${orderId}` : null,
+    () => transactionChatAPI.getThread(orderId),
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      refreshInterval: 5000,
+    }
   );
 
   useEffect(() => {
@@ -63,33 +71,12 @@ export default function OrderDetailPage() {
     );
   }
 
-  const handleConfirmOrder = async () => {
-    setIsProcessing(true);
-    try {
-      await apiClient.put(`/orders/${order.id}/confirm`);
-      mutate();
-      setIsConfirmDialogOpen(false);
-    } catch (error) {
-      const err = error as AxiosError<{ message?: string }>;
-      const backendMessage = err.response?.data?.message || "Gagal mengkonfirmasi pesanan";
-      const messageLower = backendMessage.toLowerCase();
-
-      if (order.status === "shipped" && messageLower.includes("delivered")) {
-        alert("Backend masih mengharuskan status delivered. Ubah rule endpoint confirm agar status shipped juga boleh dikonfirmasi.");
-      } else {
-        alert(backendMessage);
-      }
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const handleCancelOrder = async () => {
     setIsProcessing(true);
     try {
       await apiClient.put(`/orders/${order.id}/cancel`);
       mutate();
-      setIsConfirmDialogOpen(false);
+      setIsCancelDialogOpen(false);
     } catch (error: any) {
       alert(error.response?.data?.message || "Gagal membatalkan pesanan");
     } finally {
@@ -101,17 +88,25 @@ export default function OrderDetailPage() {
     router.push(`/payment/${order.id}`);
   };
 
-  const handleVerifyCode = async (_code: string) => {
-    return Promise.resolve();
-  };
-
-  const canConfirm = order.status === "shipped" || order.status === "delivered";
-  const canCancel = ["pending_payment", "paid", "processing"].includes(order.status);
-  const canPay = order.status === "pending_payment";
-  const isShipped = order.status === "shipped" || order.status === "delivered";
-  const isCompleted = order.status === "completed";
+  const threadChecklistDone = Boolean(
+    thread?.checklist?.account_match &&
+      thread?.checklist?.account_secured &&
+      thread?.checklist?.seller_device_removed &&
+      thread?.checklist?.completion_code_verified
+  );
+  const transactionStatusRaw = thread?.status || order.transaction_status || "chat_open";
+  const transactionStatus = threadChecklistDone ? "completed" : transactionStatusRaw;
+  const effectiveOrderStatus = transactionStatus === "completed" ? "completed" : order.status;
+  const timelineOrder: Order =
+    effectiveOrderStatus === "completed"
+      ? { ...order, status: "completed", transaction_status: "completed" }
+      : order;
+  const isCompleted = effectiveOrderStatus === "completed";
+  const canCancel = ["pending_payment", "paid", "processing"].includes(order.status) && !isCompleted;
+  const canPay = order.status === "pending_payment" && !isCompleted;
+  const canOpenTransaction = ["paid", "processing", "shipped", "delivered", "completed"].includes(order.status);
   const isCancelled = order.status === "cancelled";
-  const hasNoAction = !canPay && !canConfirm && !canCancel;
+  const hasNoAction = !canPay && !canCancel && !canOpenTransaction;
 
   return (
     <div className="section-padding">
@@ -131,7 +126,10 @@ export default function OrderDetailPage() {
                   <p className="text-xs text-text-secondary mb-1">Nomor Pesanan</p>
                   <h1 className="text-lg font-medium text-text-primary">#{order.id}</h1>
                 </div>
-                <OrderStatusBadge status={order.status} />
+                <div className="flex flex-col items-end gap-2">
+                  <OrderStatusBadge status={effectiveOrderStatus} />
+                  {canOpenTransaction && <TransactionStatusBadge status={transactionStatus} size="sm" />}
+                </div>
               </div>
               <p className="text-xs text-text-secondary">
                 Dibuat pada {formatDate(order.created_at)}
@@ -156,43 +154,9 @@ export default function OrderDetailPage() {
               </div>
             </div>
 
-            {order.tracking_number && (
-              <div className="bg-white rounded-lg p-6 mb-6 border-l-4 border-l-accent-primary">
-                <div className="flex items-start gap-3 mb-4">
-                  <Truck size={20} className="text-accent-primary flex-shrink-0 mt-1" />
-                  <div>
-                    <h2 className="text-base font-semibold text-text-primary">Informasi Pengiriman</h2>
-                    <p className="text-xs text-text-secondary mt-1">Paket Anda sedang dalam perjalanan</p>
-                  </div>
-                </div>
-                <div className="space-y-3 pl-8">
-                  <div>
-                    <p className="text-xs text-text-secondary mb-1">Nomor Tracking</p>
-                    <p className="font-mono font-semibold text-text-primary text-sm bg-gray-50 p-2 rounded">
-                      {order.tracking_number}
-                    </p>
-                  </div>
-                  <p className="text-xs text-text-secondary italic">
-                    Anda akan diminta memverifikasi kode pengiriman saat menerima paket.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {isShipped && order.tracking_number && (
-              <div className="mb-6">
-                <TrackingCodeVerification
-                  orderId={order.id}
-                  trackingNumber={order.tracking_number}
-                  onVerify={handleVerifyCode}
-                  isVerified={order.status === "delivered"}
-                />
-              </div>
-            )}
-
             <div className="card-border p-6">
               <h2 className="text-base font-medium text-text-primary mb-4">Timeline Pesanan</h2>
-              <OrderTimeline order={order} />
+              <OrderTimeline order={timelineOrder} />
             </div>
           </div>
 
@@ -218,25 +182,19 @@ export default function OrderDetailPage() {
                   </>
                 )}
 
-                {canConfirm && (
+                {canOpenTransaction && (
                   <button
-                    onClick={() => {
-                      setConfirmAction("confirm");
-                      setIsConfirmDialogOpen(true);
-                    }}
-                    className="btn-primary w-full text-sm font-medium flex items-center justify-center gap-2"
+                    onClick={() => router.push(`/orders/${order.id}/transaction`)}
+                    className="btn-secondary w-full text-sm font-medium flex items-center justify-center gap-2"
                   >
-                    <CheckCircle2 size={16} />
-                    Konfirmasi Penerimaan
+                    <MessageCircle size={16} />
+                    Buka Chat Transaksi
                   </button>
                 )}
 
                 {canCancel && (
                   <button
-                    onClick={() => {
-                      setConfirmAction("cancel");
-                      setIsConfirmDialogOpen(true);
-                    }}
+                    onClick={() => setIsCancelDialogOpen(true)}
                     className="btn-secondary w-full text-sm font-medium text-red-600 border-red-300 hover:bg-red-50"
                   >
                     Batalkan Pesanan
@@ -272,7 +230,7 @@ export default function OrderDetailPage() {
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-text-secondary">Status</span>
-                    <span className="text-text-primary capitalize">{order.status}</span>
+                    <span className="text-text-primary capitalize">{effectiveOrderStatus}</span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-text-secondary">Dibuat</span>
@@ -285,17 +243,13 @@ export default function OrderDetailPage() {
         </div>
 
         <ConfirmDialog
-          open={isConfirmDialogOpen}
-          onOpenChange={setIsConfirmDialogOpen}
-          title={confirmAction === "confirm" ? "Konfirmasi Pesanan" : "Batalkan Pesanan"}
-          description={
-            confirmAction === "confirm"
-              ? "Apakah Anda yakin barang sudah diterima dengan baik?"
-              : "Apakah Anda yakin ingin membatalkan pesanan ini?"
-          }
-          onConfirm={confirmAction === "confirm" ? handleConfirmOrder : handleCancelOrder}
-          confirmLabel={confirmAction === "confirm" ? "Konfirmasi" : "Batalkan"}
-          isDangerous={confirmAction === "cancel"}
+          open={isCancelDialogOpen}
+          onOpenChange={setIsCancelDialogOpen}
+          title="Batalkan Pesanan"
+          description="Apakah Anda yakin ingin membatalkan pesanan ini?"
+          onConfirm={handleCancelOrder}
+          confirmLabel="Batalkan"
+          isDangerous
           isLoading={isProcessing}
         />
       </div>

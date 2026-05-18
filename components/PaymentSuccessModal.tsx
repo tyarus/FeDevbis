@@ -14,6 +14,13 @@ export function PaymentSuccessModal({
   amount,
   onClose,
 }: PaymentSuccessModalProps) {
+  const formattedAmount = new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount);
+
   useEffect(() => {
     const timer = setTimeout(onClose, 3000);
     return () => clearTimeout(timer);
@@ -31,14 +38,16 @@ export function PaymentSuccessModal({
           Pembayaran Berhasil!
         </h2>
         <p className="text-sm text-text-secondary mb-4">
-          Pesanan Anda telah dikonfirmasi dan sedang diproses.
+          Pesanan Anda telah dikonfirmasi. Selanjutnya Anda akan masuk ke chat transaksi.
         </p>
         <div className="bg-green-50 p-3 rounded-lg mb-4">
           <p className="text-xs text-text-secondary">ID Pesanan</p>
           <p className="font-mono font-semibold text-green-700">#{String(orderId).slice(0, 8)}</p>
+          <p className="text-xs text-text-secondary mt-2">Total Pembayaran</p>
+          <p className="font-semibold text-text-primary">{formattedAmount}</p>
         </div>
         <p className="text-xs text-text-secondary">
-          Anda akan dialihkan dalam beberapa detik...
+          Anda akan dialihkan ke chat transaksi dalam beberapa detik...
         </p>
       </div>
     </div>

@@ -14,3 +14,5 @@ export { TrackingCodeVerification } from "./TrackingCodeVerification";
 export { GameCategorySelector } from "./GameCategorySelector";
 export { LoginMethodSelector } from "./LoginMethodSelector";
 export { SecurityGuide } from "./SecurityGuide";
+export { TransactionStatusBadge } from "./TransactionStatusBadge";
+export { TransactionChatWorkspace } from "./TransactionChatWorkspace";
