@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
+import { useWalletOverview } from "@/lib/useWallet";
+import { walletAPI } from "@/lib/wallet";
 import { Order, PaginatedResponse } from "@/types";
 import { useAuthStore } from "@/store/authStore";
 import { OrderStatusBadge, LoadingSkeleton, EmptyState } from "@/components";
-import { formatRupiah, formatDateShort, formatShortId } from "@/lib/utils";
+import { formatRupiah, formatShortId } from "@/lib/utils";
 import { 
   ShoppingBag, 
   Clock, 
@@ -26,7 +28,7 @@ const fetcher = (url: string) =>
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
-  const [isMounted, setIsMounted] = useState(false);
+  const wallet = useWalletOverview(user);
 
   const { data: ordersData, isLoading } = useSWR<PaginatedResponse<Order>>(
     "/orders?limit=50",
@@ -34,23 +36,29 @@ export default function DashboardPage() {
     { revalidateOnFocus: false }
   );
 
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  if (!isMounted) return null;
-
-  const orders = ordersData?.data || [];
+  const orders = useMemo(() => ordersData?.data || [], [ordersData?.data]);
   const totalOrders = ordersData?.pagination.total || 0;
   
   const pendingPayment = orders.filter((o) => o.status === "pending_payment").length;
-  const processing = orders.filter((o) => o.status === "processing").length;
   const needsAction = orders.filter((o) => o.status === "shipped" || o.status === "delivered").length;
   const completed = orders.filter((o) => o.status === "completed").length;
   const totalSpent = orders.reduce((sum, o) => sum + o.total_price, 0);
 
   const recentOrders = orders.slice(0, 5);
   const urgentOrders = orders.filter((o) => ["pending_payment", "shipped", "delivered"].includes(o.status));
+
+  useEffect(() => {
+    if (orders.length === 0) return;
+    walletAPI.syncOrders(
+      orders.map((order) => ({
+        id: order.id,
+        buyer_id: order.buyer_id,
+        seller_id: order.seller_id,
+        total_price: order.total_price,
+        status: order.status,
+      }))
+    );
+  }, [orders]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -153,6 +161,17 @@ export default function DashboardPage() {
               <p className="text-2xl font-bold text-text-primary">{formatRupiah(totalSpent)}</p>
               <p className="text-xs text-text-secondary mt-2">Total pengeluaran</p>
             </div>
+
+            <Link
+              href="/wallet"
+              className="card-border bg-white rounded-xl p-5 hover:shadow-lg transition-all duration-200 border-l-4 border-l-cyan-400 block"
+            >
+              <p className="text-xs text-text-secondary font-semibold mb-2 uppercase tracking-wider">Saldo Wallet</p>
+              <p className="text-2xl font-bold text-text-primary">
+                {formatRupiah(wallet?.account.available_balance || 0)}
+              </p>
+              <p className="text-xs text-cyan-700 mt-2 font-semibold">Top up sekarang</p>
+            </Link>
           </div>
 
           {/* Tips & Panduan Section */}

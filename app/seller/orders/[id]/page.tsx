@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
+import { walletAPI } from "@/lib/wallet";
 import { Order, TransactionChatData } from "@/types";
 import { transactionChatAPI } from "@/lib/transactionChat";
 import { OrderStatusBadge, OrderTimeline, LoadingSkeleton, TransactionStatusBadge } from "@/components";
@@ -15,7 +16,6 @@ const fetcher = (url: string) => apiClient.get(url).then((res) => res.data.data)
 export default function SellerOrderDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const [isMounted, setIsMounted] = useState(false);
 
   const orderId = params.id as string;
   const { data: order, isLoading } = useSWR<Order>(
@@ -34,10 +34,17 @@ export default function SellerOrderDetailPage() {
   );
 
   useEffect(() => {
-    setIsMounted(true);
-  }, []);
+    if (!order) return;
+    walletAPI.syncOrderSettlement({
+      id: order.id,
+      buyer_id: order.buyer_id,
+      seller_id: order.seller_id,
+      total_price: order.total_price,
+      status: order.status,
+    });
+  }, [order]);
 
-  if (!isMounted || isLoading) {
+  if (isLoading) {
     return (
       <div className="section-padding">
         <div className="max-content">

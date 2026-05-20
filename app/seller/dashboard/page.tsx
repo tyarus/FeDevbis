@@ -1,20 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
+import { useWalletOverview } from "@/lib/useWallet";
+import { walletAPI } from "@/lib/wallet";
 import { Product, Order, PaginatedResponse } from "@/types";
 import { useAuthStore } from "@/store/authStore";
 import { OrderStatusBadge, LoadingSkeleton, EmptyState } from "@/components";
-import { formatRupiah, formatDateShort, formatShortId } from "@/lib/utils";
+import { formatRupiah, formatShortId } from "@/lib/utils";
 import { 
   Package, 
   ShoppingBag, 
   Clock, 
   CheckCircle2,
   AlertCircle,
-  TrendingUp,
   Truck,
   ArrowRight
 } from "lucide-react";
@@ -27,9 +28,9 @@ const fetcher = (url: string) =>
 
 export default function SellerDashboardPage() {
   const { user } = useAuthStore();
-  const [isMounted, setIsMounted] = useState(false);
+  const wallet = useWalletOverview(user);
 
-  const { data: productsData, isLoading: isProductsLoading } = useSWR<PaginatedResponse<Product>>(
+  const { data: productsData } = useSWR<PaginatedResponse<Product>>(
     "/seller/products?limit=1",
     fetcher,
     { revalidateOnFocus: false }
@@ -41,12 +42,6 @@ export default function SellerDashboardPage() {
     { revalidateOnFocus: false }
   );
 
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  if (!isMounted) return null;
-
   const totalProducts = productsData?.pagination.total || 0;
   const totalOrders = ordersData?.pagination.total || 0;
   const pendingPayment = ordersData?.data?.filter((o) => o.status === "pending_payment").length || 0;
@@ -54,7 +49,20 @@ export default function SellerDashboardPage() {
   const shippedOrders = ordersData?.data?.filter((o) => o.status === "shipped" || o.status === "delivered").length || 0;
   const needsProcessing = pendingPayment + processingOrders;
 
-  const recentOrders = ordersData?.data || [];
+  const recentOrders = useMemo(() => ordersData?.data || [], [ordersData?.data]);
+
+  useEffect(() => {
+    if (recentOrders.length === 0) return;
+    walletAPI.syncOrders(
+      recentOrders.map((order) => ({
+        id: order.id,
+        buyer_id: order.buyer_id,
+        seller_id: order.seller_id,
+        total_price: order.total_price,
+        status: order.status,
+      }))
+    );
+  }, [recentOrders]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -157,6 +165,17 @@ export default function SellerDashboardPage() {
                 <p className="text-xs text-green-600 mt-2">Pengiriman aktif</p>
               </div>
             )}
+
+            <Link
+              href="/wallet"
+              className="card-border bg-white rounded-xl p-5 hover:shadow-lg transition-all duration-200 border-l-4 border-l-cyan-400 block"
+            >
+              <p className="text-xs text-text-secondary font-semibold mb-2 uppercase tracking-wider">Saldo Wallet</p>
+              <p className="text-2xl font-bold text-text-primary">
+                {formatRupiah(wallet?.account.available_balance || 0)}
+              </p>
+              <p className="text-xs text-cyan-700 mt-2 font-semibold">Tarik saldo</p>
+            </Link>
           </div>
 
           {/* Quick Actions */}

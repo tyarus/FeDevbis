@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
+import { walletAPI } from "@/lib/wallet";
 import { Order, TransactionChatData } from "@/types";
 import { transactionChatAPI } from "@/lib/transactionChat";
 import {
@@ -23,7 +24,6 @@ export default function OrderDetailPage() {
   const router = useRouter();
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isMounted, setIsMounted] = useState(false);
 
   const orderId = params.id as string;
   const { data: order, isLoading, mutate } = useSWR<Order>(
@@ -42,10 +42,17 @@ export default function OrderDetailPage() {
   );
 
   useEffect(() => {
-    setIsMounted(true);
-  }, []);
+    if (!order) return;
+    walletAPI.syncOrderSettlement({
+      id: order.id,
+      buyer_id: order.buyer_id,
+      seller_id: order.seller_id,
+      total_price: order.total_price,
+      status: order.status,
+    });
+  }, [order]);
 
-  if (!isMounted || isLoading) {
+  if (isLoading) {
     return (
       <div className="section-padding">
         <div className="max-content">
@@ -75,10 +82,18 @@ export default function OrderDetailPage() {
     setIsProcessing(true);
     try {
       await apiClient.put(`/orders/${order.id}/cancel`);
+      walletAPI.refundEscrowForOrder({
+        id: order.id,
+        buyer_id: order.buyer_id,
+        seller_id: order.seller_id,
+        total_price: order.total_price,
+        status: "cancelled",
+      });
       mutate();
       setIsCancelDialogOpen(false);
-    } catch (error: any) {
-      alert(error.response?.data?.message || "Gagal membatalkan pesanan");
+    } catch (error: unknown) {
+      const maybeError = error as { response?: { data?: { message?: string } } };
+      alert(maybeError.response?.data?.message || "Gagal membatalkan pesanan");
     } finally {
       setIsProcessing(false);
     }

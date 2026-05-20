@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
 import { transactionChatAPI } from "@/lib/transactionChat";
+import { walletAPI } from "@/lib/wallet";
 import { Order, PaginatedResponse, TransactionStatus } from "@/types";
 import { OrderStatusBadge, LoadingSkeleton, EmptyState, TransactionStatusBadge } from "@/components";
 import { formatRupiah, formatDateShort, formatShortId } from "@/lib/utils";
@@ -64,6 +65,19 @@ export default function SellerOrdersPage() {
     fetchAllSellerOrders,
     { revalidateOnFocus: false, revalidateOnMount: true }
   );
+
+  useEffect(() => {
+    if (!allOrders || allOrders.length === 0) return;
+    walletAPI.syncOrders(
+      allOrders.map((order) => ({
+        id: order.id,
+        buyer_id: order.buyer_id,
+        seller_id: order.seller_id,
+        total_price: order.total_price,
+        status: order.status,
+      }))
+    );
+  }, [allOrders]);
 
   const orderIdsKey = useMemo(
     () =>

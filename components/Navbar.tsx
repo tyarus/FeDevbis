@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/authStore";
 import { ChevronDown } from "lucide-react";
@@ -9,17 +9,12 @@ import { NotificationDropdown } from "./NotificationDropdown";
 
 export function Navbar() {
   const router = useRouter();
-  const pathname = usePathname();
   const { user, token, logout, initialize } = useAuthStore();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
-    setIsMounted(true);
     initialize();
   }, [initialize]);
-
-  if (!isMounted) return null;
 
   const handleLogout = async () => {
     await logout();
@@ -43,11 +38,19 @@ export function Navbar() {
             Produk
           </Link>
           <Link
-            href="/orders"
+            href={user?.role === "seller" ? "/seller/orders" : "/orders"}
             className="text-xs leading-5 text-text-secondary hover:text-text-primary transition-colors"
           >
-            Pesanan
+            {user?.role === "seller" ? "Pesanan Masuk" : "Pesanan"}
           </Link>
+          {token && (
+            <Link
+              href="/wallet"
+              className="text-xs leading-5 text-text-secondary hover:text-text-primary transition-colors"
+            >
+              Wallet
+            </Link>
+          )}
         </div>
 
         {/* Right Side */}
@@ -86,6 +89,12 @@ export function Navbar() {
                       className="block px-4 py-3 text-xs hover:bg-bg-secondary transition-colors"
                     >
                       Dashboard
+                    </Link>
+                    <Link
+                      href="/wallet"
+                      className="block px-4 py-3 text-xs hover:bg-bg-secondary transition-colors border-t border-border"
+                    >
+                      Wallet
                     </Link>
                     {user?.role === "seller" && (
                       <Link

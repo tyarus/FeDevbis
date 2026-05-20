@@ -24,7 +24,8 @@ export function middleware(request: NextRequest) {
   const sellerRoutes = ["/seller/dashboard", "/seller/products", "/seller/orders"];
   // Protected routes for buyers only
   const buyerRoutes = ["/dashboard", "/checkout", "/payment", "/orders"];
-  const protectedRoutes = [...sellerRoutes, ...buyerRoutes];
+  const sharedRoutes = ["/wallet"];
+  const protectedRoutes = [...sellerRoutes, ...buyerRoutes, ...sharedRoutes];
 
   // If accessing protected route without token
   if (protectedRoutes.some((route) => pathname.startsWith(route))) {

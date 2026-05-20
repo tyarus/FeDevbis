@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { AxiosError } from "axios";
 import { apiClient } from "@/lib/api";
 import { getAuthUser } from "@/lib/auth";
 import { transactionChatAPI } from "@/lib/transactionChat";
+import { walletAPI } from "@/lib/wallet";
 import {
   Order,
   OrderStatus,
@@ -167,6 +168,17 @@ export function TransactionChatWorkspace({
     [thread?.activities]
   );
 
+  useEffect(() => {
+    if (!order) return;
+    walletAPI.syncOrderSettlement({
+      id: order.id,
+      buyer_id: order.buyer_id,
+      seller_id: order.seller_id,
+      total_price: order.total_price,
+      status: order.status,
+    });
+  }, [order]);
+
   const setSuccessNotice = (message: string) => {
     setNotice({ type: "success", message });
   };
@@ -192,6 +204,14 @@ export function TransactionChatWorkspace({
       if (order.status !== "completed") {
         await transactionChatAPI.completeOrder(orderId);
       }
+
+      walletAPI.releaseEscrowForOrder({
+        id: order.id,
+        buyer_id: order.buyer_id,
+        seller_id: order.seller_id,
+        total_price: order.total_price,
+        status: "completed",
+      });
 
       await refreshAll();
       setSuccessNotice("Semua checklist terpenuhi. Transaksi otomatis diselesaikan.");

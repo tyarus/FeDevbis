@@ -420,7 +420,9 @@ Request:
 
 ```json
 {
-  "payment_method": "bank_transfer"
+  "payment_method": "bank_transfer",
+  "use_wallet": false,
+  "wallet_channel": null
 }
 ```
 
@@ -428,6 +430,10 @@ Nilai `payment_method` valid:
 - `bank_transfer`
 - `virtual_account`
 - `ewallet`
+
+Catatan:
+- `use_wallet` bersifat opsional, frontend akan mengirim `true` hanya saat `payment_method = ewallet` (Crowalet).
+- Untuk `bank_transfer` dan `virtual_account`, backend diharapkan mengabaikan saldo wallet walaupun field wallet ikut terkirim.
 
 Success `201`:
 
@@ -785,3 +791,237 @@ Success `200`:
 - Hash completion code di DB (`completion_code_hash`), jangan simpan raw code.
 - Tambahkan `ip_address` dan `user_agent` di activity log untuk investigasi admin.
 - Batasi percobaan verify code (rate limit + lock sementara).
+
+## 14) Wallet System + Escrow (NEW)
+
+Catatan ini untuk implementasi backend wallet agar alur saldo buyer/seller tersimpan permanen di server (bukan hanya simulasi di frontend).
+
+### Ringkasan Alur Bisnis
+
+1. Buyer melakukan top up simulasi (dummy):
+   - saldo buyer langsung bertambah
+   - tidak ada payment gateway real
+2. Buyer membayar order:
+   - saldo buyer dipotong
+   - dana masuk ke escrow (status: `held`)
+3. Order selesai (`completed`):
+   - dana escrow dirilis ke saldo seller (`released`)
+4. Order dibatalkan (`cancelled` / `refunded`):
+   - dana escrow dikembalikan ke buyer (`refunded`)
+5. Seller withdraw:
+   - saldo seller langsung berkurang
+   - backend membuat bukti/receipt withdraw
+
+### Endpoint Wallet yang Dibutuhkan (Protected)
+
+- `GET /api/wallet/me`
+- `POST /api/wallet/topup` (buyer only, simulasi)
+- `GET /api/wallet/ledger`
+- `GET /api/wallet/escrows`
+- `POST /api/wallet/withdraw` (seller only)
+- `GET /api/wallet/withdrawals` (seller only)
+
+### Kontrak Request/Response
+
+#### `GET /api/wallet/me`
+
+Success `200`:
+
+```json
+{
+  "success": true,
+  "message": "Data wallet berhasil diambil",
+  "data": {
+    "available_balance": 1500000,
+    "held_amount_as_buyer": 250000,
+    "held_amount_as_seller": 100000,
+    "total_topup": 2000000,
+    "total_sales": 300000,
+    "total_withdraw": 150000,
+    "total_refund": 50000
+  }
+}
+```
+
+#### `POST /api/wallet/topup` (buyer)
+
+Request:
+
+```json
+{
+  "amount": 100000
+}
+```
+
+Success `200/201`:
+
+```json
+{
+  "success": true,
+  "message": "Top up simulasi berhasil",
+  "data": {
+    "available_balance": 1600000
+  }
+}
+```
+
+#### `GET /api/wallet/ledger`
+
+Success `200`:
+
+```json
+{
+  "success": true,
+  "message": "Riwayat wallet berhasil diambil",
+  "data": [
+    {
+      "id": 101,
+      "type": "topup",
+      "direction": "credit",
+      "amount": 100000,
+      "balance_after": 1600000,
+      "description": "Top up saldo simulasi",
+      "order_id": null,
+      "created_at": "2026-05-20T09:00:00.000000Z"
+    }
+  ]
+}
+```
+
+`type` yang digunakan:
+- `topup`
+- `order_hold`
+- `order_release`
+- `order_refund`
+- `withdraw`
+
+#### `GET /api/wallet/escrows`
+
+Success `200`:
+
+```json
+{
+  "success": true,
+  "message": "Data escrow berhasil diambil",
+  "data": [
+    {
+      "order_id": 77,
+      "buyer_id": 11,
+      "seller_id": 22,
+      "amount": 250000,
+      "status": "held",
+      "created_at": "2026-05-20T09:30:00.000000Z",
+      "updated_at": "2026-05-20T09:30:00.000000Z",
+      "released_at": null,
+      "refunded_at": null
+    }
+  ]
+}
+```
+
+#### `POST /api/wallet/withdraw` (seller)
+
+Request:
+
+```json
+{
+  "amount": 150000,
+  "bank_name": "BCA",
+  "account_name": "Tyar Seller",
+  "account_number": "1234567890"
+}
+```
+
+Success `200/201`:
+
+```json
+{
+  "success": true,
+  "message": "Withdraw simulasi berhasil",
+  "data": {
+    "receipt": {
+      "id": "wd-20260520-0001",
+      "reference_number": "WD-58273419",
+      "amount": 150000,
+      "bank_name": "BCA",
+      "account_name": "Tyar Seller",
+      "account_number": "1234567890",
+      "created_at": "2026-05-20T10:00:00.000000Z"
+    },
+    "available_balance": 450000
+  }
+}
+```
+
+#### `GET /api/wallet/withdrawals` (seller)
+
+Success `200`:
+
+```json
+{
+  "success": true,
+  "message": "Riwayat withdraw berhasil diambil",
+  "data": [
+    {
+      "id": "wd-20260520-0001",
+      "reference_number": "WD-58273419",
+      "amount": 150000,
+      "bank_name": "BCA",
+      "account_name": "Tyar Seller",
+      "account_number": "1234567890",
+      "created_at": "2026-05-20T10:00:00.000000Z"
+    }
+  ]
+}
+```
+
+### Integrasi dengan Endpoint Order yang Sudah Ada
+
+Agar konsisten dengan flow frontend saat ini, logika wallet dijalankan di endpoint order berikut:
+
+- `POST /api/orders/{id}/pay`
+  - jika `payment_method = ewallet` (Crowalet):
+    - validasi saldo buyer cukup
+    - kurangi saldo buyer
+    - buat escrow `held`
+  - jika `payment_method = bank_transfer` atau `virtual_account`:
+    - **jangan** validasi/kurangi saldo wallet buyer
+    - proses pembayaran tetap lanjut sebagai simulasi non-wallet
+  - update status order ke `paid`/`processing` sesuai flow existing
+- `PUT /api/orders/{id}/confirm` (dan endpoint complete lain yang dipakai transaksi chat)
+  - release escrow ke seller
+  - update escrow jadi `released`
+  - update status order `completed`
+- `PUT /api/orders/{id}/cancel`
+  - jika escrow masih `held`, refund ke buyer
+  - update escrow jadi `refunded`
+  - update status order `cancelled`
+
+Semua proses di atas wajib transactional (DB transaction) supaya tidak ada saldo nyangkut jika terjadi error.
+
+### Saran Struktur Tabel
+
+- `wallet_accounts`
+  - `id`, `user_id` (unique), `available_balance`, `total_topup`, `total_sales`, `total_withdraw`, `total_refund`, `created_at`, `updated_at`
+- `wallet_escrows`
+  - `id`, `order_id` (unique), `buyer_id`, `seller_id`, `amount`, `status` (`held|released|refunded`), `released_at`, `refunded_at`, `created_at`, `updated_at`
+- `wallet_ledger_entries`
+  - `id`, `user_id`, `order_id` nullable, `type`, `direction` (`credit|debit`), `amount`, `balance_after`, `description`, `metadata` json nullable, `created_at`
+- `wallet_withdrawals`
+  - `id`, `seller_id`, `amount`, `bank_name`, `account_name`, `account_number`, `reference_number`, `metadata` json nullable, `created_at`
+
+### Validasi Penting
+
+- `topup.amount`: integer, min 1
+- `withdraw.amount`: integer, min 1
+- `withdraw.bank_name`: required, string
+- `withdraw.account_name`: required, string
+- `withdraw.account_number`: required, string
+- Buyer tidak boleh withdraw.
+- Seller tidak boleh top up via endpoint buyer (kecuali nanti memang ditambah fitur top up seller).
+
+### Error yang Perlu Disiapkan
+
+- `422`: validasi input gagal
+- `403`: role tidak sesuai (buyer/seller)
+- `409`: saldo tidak cukup / escrow status tidak valid untuk aksi tersebut

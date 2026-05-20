@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
+import { WalletError, walletAPI } from "@/lib/wallet";
+import { useWalletOverview } from "@/lib/useWallet";
+import { useAuthStore } from "@/store/authStore";
 import { Order, PaymentMethod } from "@/types";
 import { LoadingSkeleton, PriceDisplay, PaymentSuccessModal } from "@/components";
-import { formatDate, formatShortId } from "@/lib/utils";
+import { formatDate, formatRupiah, formatShortId } from "@/lib/utils";
 import { 
   CreditCard, 
   Banknote, 
@@ -42,9 +45,9 @@ const paymentMethods: {
   },
   { 
     value: "ewallet", 
-    label: "E-Wallet", 
+    label: "Crowalet", 
     icon: Wallet,
-    description: "Bayar menggunakan aplikasi e-wallet favorit Anda",
+    description: "Bayar menggunakan saldo Crowalet Anda",
     processingTime: "Instant"
   },
 ];
@@ -52,10 +55,10 @@ const paymentMethods: {
 export default function PaymentPage() {
   const params = useParams();
   const router = useRouter();
+  const { user } = useAuthStore();
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>("bank_transfer");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isMounted, setIsMounted] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
   const orderId = params.orderId as string;
@@ -64,12 +67,9 @@ export default function PaymentPage() {
     fetcher,
     { revalidateOnFocus: false }
   );
+  const wallet = useWalletOverview(user);
 
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  if (!isMounted || isLoading) {
+  if (isLoading) {
     return (
       <div className="section-padding">
         <div className="max-content">
@@ -126,21 +126,62 @@ export default function PaymentPage() {
     );
   }
 
+  const buyerBalance = wallet?.account.available_balance || 0;
+  const isCrowaletMethod = selectedMethod === "ewallet";
+  const isBalanceInsufficient = isCrowaletMethod && buyerBalance < order.total_price;
+
   const handlePayment = async () => {
     setIsSubmitting(true);
     setError(null);
 
     try {
+      if (isCrowaletMethod && (!user || user.role !== "buyer")) {
+        throw new WalletError("Pembayaran Crowalet hanya tersedia untuk akun buyer.");
+      }
+
+      if (isCrowaletMethod && isBalanceInsufficient) {
+        throw new WalletError(
+          `Saldo Crowalet tidak mencukupi. Butuh ${formatRupiah(order.total_price)}, saldo Anda ${formatRupiah(
+            buyerBalance
+          )}.`
+        );
+      }
+
       await apiClient.post(`/orders/${order.id}/pay`, {
         payment_method: selectedMethod,
+        use_wallet: isCrowaletMethod,
+        wallet_channel: isCrowaletMethod ? "crowalet" : null,
       });
+
+      if (isCrowaletMethod) {
+        walletAPI.holdFundsForOrder({
+          id: order.id,
+          buyer_id: order.buyer_id,
+          seller_id: order.seller_id,
+          total_price: order.total_price,
+        });
+      }
 
       setShowSuccess(true);
       setTimeout(() => {
         router.push(`/orders/${order.id}/transaction`);
       }, 3000);
-    } catch (err: any) {
-      setError(err.response?.data?.message || "Pembayaran gagal");
+    } catch (err: unknown) {
+      const maybeError = err as { response?: { data?: { message?: string } } };
+      const walletErrorMessage =
+        err instanceof WalletError ? err.message : null;
+      const backendMessage = maybeError.response?.data?.message || "";
+      const walletBlockedNonWalletMethod =
+        !isCrowaletMethod &&
+        backendMessage.toLowerCase().includes("saldo");
+
+      setError(
+        walletErrorMessage ||
+          (walletBlockedNonWalletMethod
+            ? "Backend masih memvalidasi saldo wallet untuk metode ini. Mohon update endpoint pembayaran agar Transfer Bank dan Virtual Account tidak memakai saldo Crowalet."
+            : backendMessage) ||
+          "Pembayaran gagal"
+      );
       setIsSubmitting(false);
     }
   };
@@ -301,19 +342,19 @@ export default function PaymentPage() {
                     <div className="space-y-3">
                       <div className="flex gap-3">
                         <div className="flex-shrink-0 w-6 h-6 rounded-full bg-accent-primary text-white flex items-center justify-center text-xs font-semibold">1</div>
-                        <p className="text-sm text-text-secondary">Buka aplikasi e-wallet Anda</p>
+                        <p className="text-sm text-text-secondary">Pastikan saldo Crowalet Anda cukup</p>
                       </div>
                       <div className="flex gap-3">
                         <div className="flex-shrink-0 w-6 h-6 rounded-full bg-accent-primary text-white flex items-center justify-center text-xs font-semibold">2</div>
-                        <p className="text-sm text-text-secondary">Pilih opsi pembayaran ke merchant</p>
+                        <p className="text-sm text-text-secondary">Pilih metode Crowalet pada halaman ini</p>
                       </div>
                       <div className="flex gap-3">
                         <div className="flex-shrink-0 w-6 h-6 rounded-full bg-accent-primary text-white flex items-center justify-center text-xs font-semibold">3</div>
-                        <p className="text-sm text-text-secondary">Masukkan nominal pembayaran</p>
+                        <p className="text-sm text-text-secondary">Klik lanjutkan pembayaran untuk memotong saldo</p>
                       </div>
                       <div className="flex gap-3">
                         <div className="flex-shrink-0 w-6 h-6 rounded-full bg-accent-primary text-white flex items-center justify-center text-xs font-semibold">4</div>
-                        <p className="text-sm text-text-secondary">Verifikasi dan selesaikan transaksi</p>
+                        <p className="text-sm text-text-secondary">Dana masuk escrow dan menunggu transaksi selesai</p>
                       </div>
                     </div>
                   )}
@@ -365,9 +406,36 @@ export default function PaymentPage() {
                 </div>
 
                 {/* Action Buttons */}
+                {isCrowaletMethod ? (
+                  <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-xs text-blue-700 mb-1">Saldo Crowalet Anda</p>
+                    <p className="text-sm font-semibold text-blue-900">{formatRupiah(buyerBalance)}</p>
+                  </div>
+                ) : (
+                  <div className="mb-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <p className="text-xs text-slate-700">
+                      Metode ini tidak menggunakan saldo Crowalet.
+                    </p>
+                  </div>
+                )}
+
+                {isCrowaletMethod && isBalanceInsufficient && (
+                  <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-xs text-red-700 mb-2">
+                      Saldo Crowalet kurang untuk membayar pesanan ini.
+                    </p>
+                    <button
+                      onClick={() => router.push("/wallet")}
+                      className="text-xs font-semibold text-red-700 hover:underline"
+                    >
+                      Top up dulu di Crowalet
+                    </button>
+                  </div>
+                )}
+
                 <button
                   onClick={handlePayment}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isBalanceInsufficient}
                   className="btn-primary w-full text-sm font-medium disabled:opacity-50 mb-3 flex items-center justify-center gap-2 transition-all"
                 >
                   {isSubmitting ? (
