@@ -5,14 +5,15 @@ import { useRouter, useParams } from "next/navigation";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
 import { walletAPI } from "@/lib/wallet";
-import { Order, TransactionChatData } from "@/types";
+import { Order, TransactionChatData, CancellationRequest } from "@/types";
 import { transactionChatAPI } from "@/lib/transactionChat";
 import {
   OrderStatusBadge,
   TransactionStatusBadge,
   OrderTimeline,
   LoadingSkeleton,
-  ConfirmDialog,
+  CancellationRequestDialog,
+  CancellationRequestStatus,
 } from "@/components";
 import { formatRupiah, formatDate, formatDateShort } from "@/lib/utils";
 import { AlertCircle, CheckCircle2, MessageCircle } from "lucide-react";
@@ -23,7 +24,6 @@ export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
 
   const orderId = params.id as string;
   const { data: order, isLoading, mutate } = useSWR<Order>(
@@ -34,6 +34,22 @@ export default function OrderDetailPage() {
   const { data: thread } = useSWR<TransactionChatData>(
     orderId ? `order-thread-status-${orderId}` : null,
     () => transactionChatAPI.getThread(orderId),
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      refreshInterval: 5000,
+    }
+  );
+  const { data: cancellationRequest } = useSWR<CancellationRequest | null>(
+    orderId ? `order-cancellation-request-${orderId}` : null,
+    async () => {
+      try {
+        const response = await apiClient.get(`/orders/${orderId}/cancellation-request`);
+        return response.data.data || null;
+      } catch {
+        return null;
+      }
+    },
     {
       revalidateOnFocus: false,
       shouldRetryOnError: false,
@@ -89,27 +105,6 @@ export default function OrderDetailPage() {
       </div>
     );
   }
-
-  const handleCancelOrder = async () => {
-    setIsProcessing(true);
-    try {
-      await apiClient.put(`/orders/${order.id}/cancel`);
-      walletAPI.refundEscrowForOrder({
-        id: order.id,
-        buyer_id: order.buyer_id,
-        seller_id: order.seller_id,
-        total_price: order.total_price,
-        status: "cancelled",
-      });
-      mutate();
-      setIsCancelDialogOpen(false);
-    } catch (error: unknown) {
-      const maybeError = error as { response?: { data?: { message?: string } } };
-      alert(maybeError.response?.data?.message || "Gagal membatalkan pesanan");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
   const handlePayment = () => {
     router.push(`/payment/${order.id}`);
@@ -181,6 +176,12 @@ export default function OrderDetailPage() {
               </div>
             </div>
 
+            {cancellationRequest && (
+              <div className="mb-6">
+                <CancellationRequestStatus request={cancellationRequest} />
+              </div>
+            )}
+
             <div className="card-border p-6">
               <h2 className="text-base font-medium text-text-primary mb-4">Timeline Pesanan</h2>
               <OrderTimeline order={timelineOrder} />
@@ -219,7 +220,7 @@ export default function OrderDetailPage() {
                   </button>
                 )}
 
-                {canCancel && (
+                {canCancel && !cancellationRequest && (
                   <button
                     onClick={() => setIsCancelDialogOpen(true)}
                     className="btn-secondary w-full text-sm font-medium text-red-600 border-red-300 hover:bg-red-50"
@@ -269,15 +270,13 @@ export default function OrderDetailPage() {
           </div>
         </div>
 
-        <ConfirmDialog
+        <CancellationRequestDialog
           open={isCancelDialogOpen}
           onOpenChange={setIsCancelDialogOpen}
-          title="Batalkan Pesanan"
-          description="Apakah Anda yakin ingin membatalkan pesanan ini?"
-          onConfirm={handleCancelOrder}
-          confirmLabel="Batalkan"
-          isDangerous
-          isLoading={isProcessing}
+          orderId={orderId}
+          onSuccess={() => {
+            mutate();
+          }}
         />
       </div>
     </div>

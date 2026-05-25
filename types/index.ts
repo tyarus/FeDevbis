@@ -248,6 +248,32 @@ export type LoginMethod =
   | "konami_id"
   | "ea";
 
+// Cancellation Request types
+export type CancellationReason = 
+  | "urgent_payment_delay"
+  | "product_mismatch"
+  | "ordering_mistake"
+  | "other";
+
+export interface CancellationRequest {
+  id: string;
+  order_id: string;
+  buyer_id: string;
+  seller_id: string;
+  reason: CancellationReason;
+  details?: string;
+  status: "pending" | "approved" | "rejected";
+  seller_notes?: string;
+  rejection_reason?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateCancellationRequestInput {
+  reason: CancellationReason;
+  details?: string;
+}
+
 export interface LoginMethodOption {
   id: LoginMethod;
   name: string;

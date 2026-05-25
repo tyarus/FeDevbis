@@ -278,7 +278,39 @@ export const walletAPI = {
   getAccount(user: Pick<User, "id" | "role">): WalletAccount {
     const state = readState();
     const userId = toComparableId(user.id);
-    return state.accounts[userId] || createWalletAccount(userId, user.role);
+    let account = state.accounts[userId];
+    
+    // If account doesn't exist, create and persist it
+    if (!account) {
+      account = createWalletAccount(userId, user.role);
+      state.accounts[userId] = account;
+      writeState(state);
+    }
+    
+    return account;
+  },
+
+  ensureAccountExists(user: Pick<User, "id" | "role">): WalletAccount {
+    const state = readState();
+    const userId = toComparableId(user.id);
+    const existing = state.accounts[userId];
+    
+    if (existing) {
+      return existing;
+    }
+
+    const created = createWalletAccount(userId, user.role);
+    state.accounts[userId] = created;
+    writeState(state);
+    
+    if (canUseStorage() && typeof window !== "undefined") {
+      window.console.debug("[wallet] ensureAccountExists created:", {
+        userId,
+        role: user.role,
+      });
+    }
+    
+    return created;
   },
 
   getOverview(user: Pick<User, "id" | "role">): WalletOverview {
@@ -339,6 +371,19 @@ export const walletAPI = {
     });
 
     writeState(state);
+    
+    // Debug: Verify write was successful
+    if (canUseStorage() && typeof window !== "undefined") {
+      const verifyState = readState();
+      const verifiedAccount = verifyState.accounts[buyerId];
+      window.console.debug("[wallet] topUpBuyer completed:", {
+        buyerId,
+        amount: normalizedAmount,
+        newBalance: account.available_balance,
+        verified: verifiedAccount?.available_balance,
+      });
+    }
+    
     return account;
   },
 
@@ -359,8 +404,24 @@ export const walletAPI = {
     }
 
     const buyerAccount = getOrCreateAccount(state, buyerId, "buyer");
+    
+    // Debug: Log account info for troubleshooting
+    if (canUseStorage() && typeof window !== "undefined") {
+      const debugInfo = {
+        buyerId,
+        orderId,
+        amount,
+        available: buyerAccount.available_balance,
+        sufficient: buyerAccount.available_balance >= amount,
+      };
+      window.console.debug("[wallet] holdFundsForOrder check:", debugInfo);
+    }
+    
     if (buyerAccount.available_balance < amount) {
-      throw new WalletError("Saldo buyer tidak mencukupi untuk melakukan pembayaran ini.");
+      throw new WalletError(
+        `Saldo buyer tidak mencukupi untuk melakukan pembayaran ini. ` +
+        `Saldo: Rp${buyerAccount.available_balance}, dibutuhkan: Rp${amount}`
+      );
     }
 
     buyerAccount.available_balance -= amount;

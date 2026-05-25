@@ -123,6 +123,19 @@ export default function PaymentPage() {
       });
 
       if (method === "ewallet") {
+        // For ewallet, verify balance again before holding funds
+        // This ensures we have fresh data from localStorage
+        const freshWallet = walletAPI.getOverview(user!);
+        const freshBalance = freshWallet?.account.available_balance || 0;
+        
+        if (freshBalance < (order?.total_price || 0)) {
+          throw new WalletError(
+            `Saldo Crowalet tidak mencukupi. Butuh ${formatRupiah(order.total_price)}, saldo Anda ${formatRupiah(
+              freshBalance
+            )}.`
+          );
+        }
+
         walletAPI.holdFundsForOrder({
           id: order.id,
           buyer_id: order.buyer_id,
@@ -131,7 +144,7 @@ export default function PaymentPage() {
         });
       }
     },
-    [order]
+    [order, user]
   );
 
   useEffect(() => {
