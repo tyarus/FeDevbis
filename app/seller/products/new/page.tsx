@@ -18,8 +18,8 @@ const productSchema = z.object({
   stock: z.number().min(1, "Stok minimal 1 unit"),
   image_url: z.string().optional().or(z.literal("")),
   status: z.enum(["active", "inactive"]),
-  game_category: z.string().optional(),
-  login_method: z.string().optional(),
+  game_category: z.enum(["mobile_legends", "pubg_mobile", "free_fire", "efootball", "fifa_26"]).optional(),
+  login_method: z.enum(["facebook", "google", "x", "konami_id", "ea"]).optional(),
 });
 
 export default function NewProductPage() {

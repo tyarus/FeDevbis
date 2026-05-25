@@ -27,13 +27,19 @@ interface NotificationResponse {
   };
 }
 
+interface UnreadCountResponse {
+  data: {
+    unread_count: number;
+  };
+}
+
 const fetcher = (url: string) => apiClient.get(url).then((res) => res.data);
 
 export function useNotifications() {
   const { user } = useAuthStore();
 
   // Only fetch if user is logged in
-  const { data, isLoading, mutate } = useSWR<any>(
+  const { data, isLoading, mutate } = useSWR<NotificationResponse>(
     user ? "/notifications" : null,
     fetcher,
     {
@@ -42,7 +48,7 @@ export function useNotifications() {
     }
   );
 
-  const { data: unreadData } = useSWR<any>(
+  const { data: unreadData } = useSWR<UnreadCountResponse>(
     user ? "/notifications/unread-count" : null,
     fetcher,
     {
@@ -51,7 +57,7 @@ export function useNotifications() {
     }
   );
 
-  const notifications = data?.data || [];
+  const notifications: Notification[] = data?.data ?? [];
   const unreadCount = unreadData?.data?.unread_count || 0;
 
   const markAsRead = async (notificationId: string) => {

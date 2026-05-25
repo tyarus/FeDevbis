@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell, X, AlertCircle, CheckCircle2, Clock, Info } from "lucide-react";
-import { useNotifications } from "@/lib/useNotifications";
+import { Notification, useNotifications } from "@/lib/useNotifications";
 import { useAuthStore } from "@/store/authStore";
 
 export function NotificationDropdown() {
@@ -44,7 +44,7 @@ export function NotificationDropdown() {
     }
   };
 
-  const handleNotificationClick = (notif: any) => {
+  const handleNotificationClick = (notif: Notification) => {
     if (!notif.is_read) {
       markAsRead(notif.id);
     }

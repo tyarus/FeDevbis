@@ -19,8 +19,8 @@ const optionalNumberField = (min: number, message: string) =>
       if (typeof value === "number" && Number.isNaN(value)) return undefined;
       return value;
     },
-    z.number().min(min, message).optional()
-  );
+    z.number().min(min, message)
+  ).optional();
 
 const optionalStringField = (min: number, message: string) =>
   z.preprocess(
@@ -29,8 +29,8 @@ const optionalStringField = (min: number, message: string) =>
       const trimmed = value.trim();
       return trimmed === "" ? undefined : trimmed;
     },
-    z.string().min(min, message).optional()
-  );
+    z.string().min(min, message)
+  ).optional();
 
 const productSchema = z.object({
   name: optionalStringField(3, "Nama minimal 3 karakter"),
@@ -39,9 +39,12 @@ const productSchema = z.object({
   stock: optionalNumberField(0, "Stok tidak boleh negatif"),
   image_url: z.string().optional().or(z.literal("")),
   status: z.enum(["active", "inactive"]).optional(),
-  game_category: z.string().optional(),
-  login_method: z.string().optional(),
+  game_category: z.enum(["mobile_legends", "pubg_mobile", "free_fire", "efootball", "fifa_26"]).optional(),
+  login_method: z.enum(["facebook", "google", "x", "konami_id", "ea"]).optional(),
 });
+
+type UpdateProductFormValues = z.output<typeof productSchema>;
+type UpdateProductFormInput = z.input<typeof productSchema>;
 
 const fetcher = (url: string) => apiClient.get(url).then((res) => res.data.data);
 
@@ -70,14 +73,14 @@ export default function EditProductPage() {
     setValue,
     reset,
     formState: { errors },
-  } = useForm<UpdateProductInput>({
+  } = useForm<UpdateProductFormInput, unknown, UpdateProductFormValues>({
     resolver: zodResolver(productSchema),
   });
 
-  const status = watch("status");
-  const name = watch("name");
-  const price = watch("price");
-  const stock = watch("stock");
+  const status = watch("status") as UpdateProductFormValues["status"];
+  const name = watch("name") as UpdateProductFormValues["name"];
+  const price = watch("price") as UpdateProductFormValues["price"];
+  const stock = watch("stock") as UpdateProductFormValues["stock"];
   const gameCategory = watch("game_category") as GameCategory | undefined;
   const loginMethod = watch("login_method") as LoginMethod | undefined;
 
@@ -189,7 +192,7 @@ export default function EditProductPage() {
     );
   }
 
-  const onSubmit = async (data: UpdateProductInput) => {
+  const onSubmit = async (data: UpdateProductFormValues) => {
     setIsSubmitting(true);
     setApiError(null);
 
@@ -224,7 +227,7 @@ export default function EditProductPage() {
     }
   };
 
-  const onSubmitInvalid = (formErrors: FieldErrors<UpdateProductInput>) => {
+  const onSubmitInvalid = (formErrors: FieldErrors<UpdateProductFormInput>) => {
     const messages = collectErrorMessages(formErrors);
     if (messages.length > 0) {
       setApiError(`Form belum valid: ${messages.join(" | ")}`);
@@ -559,7 +562,7 @@ export default function EditProductPage() {
   );
 }
 
-function collectErrorMessages(errors: FieldErrors<UpdateProductInput>): string[] {
+function collectErrorMessages(errors: FieldErrors<UpdateProductFormInput>): string[] {
   const allMessages: string[] = [];
 
   const walk = (node: unknown) => {
