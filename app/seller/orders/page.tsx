@@ -5,6 +5,12 @@ import Link from "next/link";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
 import { transactionChatAPI } from "@/lib/transactionChat";
+import {
+  canFetchTransactionThread,
+  getEffectiveOrderStatus,
+  getEffectiveTransactionStatus,
+  isChecklistCompleted,
+} from "@/lib/orderStatus";
 import { walletAPI } from "@/lib/wallet";
 import { Order, PaginatedResponse, TransactionStatus } from "@/types";
 import { OrderStatusBadge, LoadingSkeleton, EmptyState, TransactionStatusBadge } from "@/components";
@@ -66,19 +72,6 @@ export default function SellerOrdersPage() {
     { revalidateOnFocus: false, revalidateOnMount: true }
   );
 
-  useEffect(() => {
-    if (!allOrders || allOrders.length === 0) return;
-    walletAPI.syncOrders(
-      allOrders.map((order) => ({
-        id: order.id,
-        buyer_id: order.buyer_id,
-        seller_id: order.seller_id,
-        total_price: order.total_price,
-        status: order.status,
-      }))
-    );
-  }, [allOrders]);
-
   const orderIdsKey = useMemo(
     () =>
       (allOrders || [])
@@ -93,14 +86,13 @@ export default function SellerOrdersPage() {
     async () => {
       const entries = await Promise.all(
         (allOrders || []).map(async (order) => {
+          if (!canFetchTransactionThread(order.status)) {
+            return [String(order.id), order.transaction_status || "chat_open"] as const;
+          }
+
           try {
             const thread = await transactionChatAPI.getThread(String(order.id));
-            const checklistDone = Boolean(
-              thread.checklist.account_match &&
-                thread.checklist.account_secured &&
-                thread.checklist.seller_device_removed &&
-                thread.checklist.completion_code_verified
-            );
+            const checklistDone = isChecklistCompleted(thread.checklist);
             const status = checklistDone ? "completed" : thread.status;
             return [String(order.id), status] as const;
           } catch {
@@ -118,18 +110,38 @@ export default function SellerOrdersPage() {
     }
   );
 
+  useEffect(() => {
+    if (!allOrders || allOrders.length === 0) return;
+    walletAPI.syncOrders(
+      allOrders.map((order) => {
+        const mappedTransactionStatus = getEffectiveTransactionStatus(
+          order,
+          threadStatusMap?.[String(order.id)]
+        );
+        const mappedOrderStatus = getEffectiveOrderStatus(order, mappedTransactionStatus);
+
+        return {
+          id: order.id,
+          buyer_id: order.buyer_id,
+          seller_id: order.seller_id,
+          total_price: order.total_price,
+          status: mappedOrderStatus,
+          transaction_status: mappedTransactionStatus,
+        };
+      })
+    );
+  }, [allOrders, threadStatusMap]);
+
   const getTransactionStatus = useCallback(
     (order: Order): TransactionStatus | undefined => {
-      const mappedStatus = threadStatusMap?.[String(order.id)];
-      return mappedStatus || order.transaction_status;
+      return getEffectiveTransactionStatus(order, threadStatusMap?.[String(order.id)]);
     },
     [threadStatusMap]
   );
 
   const getEffectiveStatus = useCallback(
     (order: Order): Order["status"] => {
-      const transactionStatus = getTransactionStatus(order);
-      return transactionStatus === "completed" ? "completed" : order.status;
+      return getEffectiveOrderStatus(order, getTransactionStatus(order));
     },
     [getTransactionStatus]
   );

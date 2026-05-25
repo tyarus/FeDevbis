@@ -203,6 +203,8 @@ export default function EditProductPage() {
         price: data.price,
         stock: data.stock,
         status: data.status,
+        game_category: data.game_category ?? gameCategory,
+        login_method: data.login_method ?? loginMethod,
       };
 
       if (isImageDirty) {

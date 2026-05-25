@@ -35,14 +35,26 @@ export default function SellerOrderDetailPage() {
 
   useEffect(() => {
     if (!order) return;
+
+    const checklistDone = Boolean(
+      thread?.checklist?.account_match &&
+        thread?.checklist?.account_secured &&
+        thread?.checklist?.seller_device_removed &&
+        thread?.checklist?.completion_code_verified
+    );
+    const mappedTransactionStatus = checklistDone
+      ? "completed"
+      : thread?.status || order.transaction_status;
+
     walletAPI.syncOrderSettlement({
       id: order.id,
       buyer_id: order.buyer_id,
       seller_id: order.seller_id,
       total_price: order.total_price,
-      status: order.status,
+      status: mappedTransactionStatus === "completed" ? "completed" : order.status,
+      transaction_status: mappedTransactionStatus,
     });
-  }, [order]);
+  }, [order, thread]);
 
   if (isLoading) {
     return (

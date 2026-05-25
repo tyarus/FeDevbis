@@ -175,9 +175,10 @@ export function TransactionChatWorkspace({
       buyer_id: order.buyer_id,
       seller_id: order.seller_id,
       total_price: order.total_price,
-      status: order.status,
+      status: transactionStatus === "completed" ? "completed" : order.status,
+      transaction_status: isChecklistDone ? "completed" : transactionStatus,
     });
-  }, [order]);
+  }, [order, transactionStatus, isChecklistDone]);
 
   const setSuccessNotice = (message: string) => {
     setNotice({ type: "success", message });

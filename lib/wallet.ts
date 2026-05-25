@@ -1,6 +1,11 @@
 import { Order, User } from "@/types";
 
 export type WalletRole = "buyer" | "seller";
+export type WalletWithdrawMethod =
+  | "bank_transfer"
+  | "gopay"
+  | "dana"
+  | "shopeepay";
 
 export type WalletLedgerType =
   | "topup"
@@ -27,6 +32,7 @@ export interface WalletEscrowRecord {
   seller_id: string;
   amount: number;
   status: "held" | "released" | "refunded";
+  funding_source: "wallet" | "gateway";
   created_at: string;
   updated_at: string;
   released_at?: string | null;
@@ -50,6 +56,7 @@ export interface WalletWithdrawReceipt {
   id: string;
   seller_id: string;
   amount: number;
+  withdraw_method: WalletWithdrawMethod;
   bank_name: string;
   account_name: string;
   account_number: string;
@@ -79,10 +86,12 @@ interface OrderWalletContext {
   seller_id: string | number;
   total_price: number;
   status?: Order["status"];
+  transaction_status?: Order["transaction_status"];
 }
 
 interface WithdrawPayload {
   amount: number;
+  withdraw_method?: WalletWithdrawMethod;
   bank_name: string;
   account_name: string;
   account_number: string;
@@ -114,6 +123,21 @@ const toPositiveInteger = (value: number): number =>
 
 const generateId = (prefix: string): string =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+const SETTLED_ORDER_STATUSES = new Set<Order["status"]>([
+  "paid",
+  "processing",
+  "shipped",
+  "delivered",
+  "completed",
+]);
+
+const WITHDRAW_METHOD_LABEL: Record<WalletWithdrawMethod, string> = {
+  bank_transfer: "Bank Transfer",
+  gopay: "GoPay",
+  dana: "DANA",
+  shopeepay: "ShopeePay",
+};
 
 const createWalletAccount = (userId: string, role: WalletRole): WalletAccount => {
   const createdAt = nowISO();
@@ -192,6 +216,28 @@ const appendLedgerEntry = (
   });
 };
 
+const buildEscrowRecord = (
+  orderId: string,
+  buyerId: string,
+  sellerId: string,
+  amount: number,
+  fundingSource: WalletEscrowRecord["funding_source"]
+): WalletEscrowRecord => {
+  const createdAt = nowISO();
+  return {
+    order_id: orderId,
+    buyer_id: buyerId,
+    seller_id: sellerId,
+    amount,
+    status: "held",
+    funding_source: fundingSource,
+    created_at: createdAt,
+    updated_at: createdAt,
+    released_at: null,
+    refunded_at: null,
+  };
+};
+
 const getEscrowCollectionsByUser = (state: WalletState, userId: string) => {
   const escrows = Object.values(state.escrows).sort(
     (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
@@ -257,7 +303,10 @@ export const walletAPI = {
       held_amount_as_seller,
       escrows,
       ledger,
-      withdrawals,
+      withdrawals: withdrawals.map((receipt) => ({
+        ...receipt,
+        withdraw_method: receipt.withdraw_method || "bank_transfer",
+      })),
     };
   },
 
@@ -317,18 +366,7 @@ export const walletAPI = {
     buyerAccount.available_balance -= amount;
     buyerAccount.updated_at = nowISO();
 
-    const createdAt = nowISO();
-    const escrow: WalletEscrowRecord = {
-      order_id: orderId,
-      buyer_id: buyerId,
-      seller_id: sellerId,
-      amount,
-      status: "held",
-      created_at: createdAt,
-      updated_at: createdAt,
-      released_at: null,
-      refunded_at: null,
-    };
+    const escrow = buildEscrowRecord(orderId, buyerId, sellerId, amount, "wallet");
 
     state.escrows[orderId] = escrow;
 
@@ -345,6 +383,31 @@ export const walletAPI = {
 
     writeState(state);
     return escrow;
+  },
+
+  holdGatewayFundsForOrder(order: OrderWalletContext): WalletEscrowRecord | null {
+    const orderId = toComparableId(order.id);
+    const buyerId = toComparableId(order.buyer_id);
+    const sellerId = toComparableId(order.seller_id);
+    const amount = toPositiveInteger(order.total_price);
+
+    if (!orderId || !buyerId || !sellerId || amount <= 0) {
+      return null;
+    }
+
+    const state = readState();
+    const existingEscrow = state.escrows[orderId];
+    if (existingEscrow) return existingEscrow;
+
+    state.escrows[orderId] = buildEscrowRecord(
+      orderId,
+      buyerId,
+      sellerId,
+      amount,
+      "gateway"
+    );
+    writeState(state);
+    return state.escrows[orderId];
   },
 
   releaseEscrowForOrder(order: OrderWalletContext): WalletEscrowRecord | null {
@@ -415,14 +478,24 @@ export const walletAPI = {
 
   syncOrderSettlement(order: OrderWalletContext): "released" | "refunded" | "none" {
     const orderId = toComparableId(order.id);
-    const state = readState();
-    const escrow = state.escrows[orderId];
+    let state = readState();
+    let escrow = state.escrows[orderId];
+    const isTransactionCompleted = order.transaction_status === "completed";
+
+    if (
+      !escrow &&
+      ((order.status && SETTLED_ORDER_STATUSES.has(order.status)) || isTransactionCompleted)
+    ) {
+      this.holdGatewayFundsForOrder(order);
+      state = readState();
+      escrow = state.escrows[orderId];
+    }
 
     if (!escrow || escrow.status !== "held") {
       return "none";
     }
 
-    if (order.status === "completed") {
+    if (order.status === "completed" || isTransactionCompleted) {
       this.releaseEscrowForOrder(order);
       return "released";
     }
@@ -454,12 +527,16 @@ export const walletAPI = {
       throw new WalletError("Nominal withdraw harus lebih dari Rp0.");
     }
 
+    const withdrawMethod = payload.withdraw_method || "bank_transfer";
     const bankName = payload.bank_name.trim();
     const accountName = payload.account_name.trim();
     const accountNumber = payload.account_number.trim();
 
-    if (!bankName || !accountName || !accountNumber) {
+    if (!accountName || !accountNumber) {
       throw new WalletError("Data rekening untuk withdraw belum lengkap.");
+    }
+    if (withdrawMethod === "bank_transfer" && !bankName) {
+      throw new WalletError("Nama bank wajib diisi untuk transfer bank.");
     }
 
     const state = readState();
@@ -478,6 +555,7 @@ export const walletAPI = {
       id: generateId("wd"),
       seller_id: sellerId,
       amount,
+      withdraw_method: withdrawMethod,
       bank_name: bankName,
       account_name: accountName,
       account_number: accountNumber,
@@ -494,7 +572,7 @@ export const walletAPI = {
       direction: "debit",
       amount,
       balance_after: account.available_balance,
-      description: `Withdraw simulasi ke ${bankName} (${accountNumber})`,
+      description: `Withdraw simulasi ke ${WITHDRAW_METHOD_LABEL[withdrawMethod]} (${accountNumber})`,
     });
 
     writeState(state);

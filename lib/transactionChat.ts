@@ -105,17 +105,29 @@ const getTransactionBasePaths = (orderId: string): string[] => [
   `/orders/${orderId}/transaction`,
 ];
 
+const isThreadFallbackStatus = (status?: number): boolean =>
+  status === 401 || status === 403 || status === 404 || status === 405;
+
 export const transactionChatAPI = {
   async getThread(orderId: string): Promise<TransactionChatData> {
     const basePaths = getTransactionBasePaths(orderId);
-    const data = await withFallback(
-      basePaths.map((path) => async () => {
-        const response = await apiClient.get(path);
-        return unwrapApiData<Partial<TransactionChatData>>(response.data);
-      })
-    );
+    let lastError: unknown = null;
 
-    return normalizeTransactionData(orderId, data);
+    for (const path of basePaths) {
+      try {
+        const response = await apiClient.get(path, { skipAuthRedirect: true });
+        const data = unwrapApiData<Partial<TransactionChatData>>(response.data);
+        return normalizeTransactionData(orderId, data);
+      } catch (error) {
+        lastError = error;
+        const axiosError = error as AxiosError;
+        if (!isThreadFallbackStatus(axiosError.response?.status)) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError;
   },
 
   async sendMessage(orderId: string, input: TransactionChatMessageInput): Promise<TransactionChatMessage> {

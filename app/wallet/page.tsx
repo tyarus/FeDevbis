@@ -1,19 +1,128 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import useSWR from "swr";
 import { useAuthStore } from "@/store/authStore";
+import { apiClient } from "@/lib/api";
+import {
+  canFetchTransactionThread,
+  getEffectiveOrderStatus,
+  getEffectiveTransactionStatus,
+  isChecklistCompleted,
+} from "@/lib/orderStatus";
+import { transactionChatAPI } from "@/lib/transactionChat";
 import {
   WalletError,
   WalletWithdrawReceipt,
+  WalletWithdrawMethod,
   walletAPI,
 } from "@/lib/wallet";
 import { useWalletOverview } from "@/lib/useWallet";
 import { formatDate, formatRupiah } from "@/lib/utils";
+import { Order, PaginatedResponse, TransactionStatus } from "@/types";
 import { ArrowLeft, ReceiptText, Wallet, Landmark, AlertCircle } from "lucide-react";
 
 const TOPUP_OPTIONS = [50000, 100000, 250000, 500000, 1000000];
+const FETCH_PAGE_SIZE = 100;
+
+type WithdrawMethodOption = {
+  value: WalletWithdrawMethod;
+  label: string;
+  accountLabel: string;
+  accountPlaceholder: string;
+  providerLabel: string;
+  providerPlaceholder: string;
+  needsProviderName: boolean;
+};
+
+const WITHDRAW_METHOD_OPTIONS: WithdrawMethodOption[] = [
+  {
+    value: "bank_transfer",
+    label: "Transfer Bank",
+    accountLabel: "Nomor rekening",
+    accountPlaceholder: "Contoh: 1234567890",
+    providerLabel: "Nama bank",
+    providerPlaceholder: "Contoh: BCA, BRI, Mandiri",
+    needsProviderName: true,
+  },
+  {
+    value: "gopay",
+    label: "GoPay",
+    accountLabel: "Nomor HP terdaftar",
+    accountPlaceholder: "Contoh: 081234567890",
+    providerLabel: "Penerima",
+    providerPlaceholder: "GoPay",
+    needsProviderName: false,
+  },
+  {
+    value: "dana",
+    label: "DANA",
+    accountLabel: "Nomor HP terdaftar",
+    accountPlaceholder: "Contoh: 081234567890",
+    providerLabel: "Penerima",
+    providerPlaceholder: "DANA",
+    needsProviderName: false,
+  },
+  {
+    value: "shopeepay",
+    label: "ShopeePay",
+    accountLabel: "Nomor HP terdaftar",
+    accountPlaceholder: "Contoh: 081234567890",
+    providerLabel: "Penerima",
+    providerPlaceholder: "ShopeePay",
+    needsProviderName: false,
+  },
+];
+
+const WITHDRAW_METHOD_LABEL: Record<WalletWithdrawMethod, string> = {
+  bank_transfer: "Transfer Bank",
+  gopay: "GoPay",
+  dana: "DANA",
+  shopeepay: "ShopeePay",
+};
+
+const fetchOrdersPage = async (
+  role: "buyer" | "seller",
+  page: number
+): Promise<PaginatedResponse<Order>> => {
+  const endpoint =
+    role === "seller"
+      ? `/seller/orders?page=${page}&limit=${FETCH_PAGE_SIZE}`
+      : `/orders?page=${page}&limit=${FETCH_PAGE_SIZE}`;
+  const res = await apiClient.get(endpoint);
+
+  return {
+    data: res.data.data || [],
+    pagination: res.data.pagination || {
+      current_page: 1,
+      total: 0,
+      per_page: FETCH_PAGE_SIZE,
+      last_page: 1,
+    },
+  };
+};
+
+const fetchAllOrdersForRole = async (role: "buyer" | "seller"): Promise<Order[]> => {
+  const firstPage = await fetchOrdersPage(role, 1);
+  const allOrders = [...firstPage.data];
+  const lastPage = firstPage.pagination?.last_page || 1;
+
+  if (lastPage <= 1) return allOrders;
+
+  const nextPages: Array<Promise<PaginatedResponse<Order>>> = [];
+  for (let page = 2; page <= lastPage; page += 1) {
+    nextPages.push(fetchOrdersPage(role, page));
+  }
+
+  const pageResults = await Promise.all(nextPages);
+  for (const result of pageResults) {
+    allOrders.push(...result.data);
+  }
+
+  return allOrders;
+};
 
 export default function WalletPage() {
   const router = useRouter();
@@ -22,6 +131,7 @@ export default function WalletPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [customTopup, setCustomTopup] = useState<string>("");
   const [withdrawAmount, setWithdrawAmount] = useState<string>("");
+  const [withdrawMethod, setWithdrawMethod] = useState<WalletWithdrawMethod>("bank_transfer");
   const [bankName, setBankName] = useState("");
   const [accountName, setAccountName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
@@ -29,11 +139,82 @@ export default function WalletPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const wallet = useWalletOverview(user);
+  const { data: relatedOrders } = useSWR<Order[]>(
+    user ? `wallet-orders-sync:${user.id}:${user.role}` : null,
+    () => fetchAllOrdersForRole(user!.role),
+    { revalidateOnFocus: false, revalidateOnMount: true }
+  );
+  const orderIdsKey = useMemo(
+    () =>
+      (relatedOrders || [])
+        .map((order) => String(order.id))
+        .sort()
+        .join(","),
+    [relatedOrders]
+  );
+  const { data: threadStatusMap } = useSWR<Record<string, TransactionStatus>>(
+    orderIdsKey ? `wallet-thread-status:${orderIdsKey}` : null,
+    async () => {
+      const entries = await Promise.all(
+        (relatedOrders || []).map(async (order) => {
+          if (!canFetchTransactionThread(order.status)) {
+            return [String(order.id), order.transaction_status || "chat_open"] as const;
+          }
+
+          try {
+            const thread = await transactionChatAPI.getThread(String(order.id));
+            const checklistDone = isChecklistCompleted(thread.checklist);
+            const status = checklistDone ? "completed" : thread.status;
+            return [String(order.id), status] as const;
+          } catch {
+            return [String(order.id), order.transaction_status || "chat_open"] as const;
+          }
+        })
+      );
+
+      return Object.fromEntries(entries);
+    },
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      refreshInterval: 6000,
+    }
+  );
 
   const topupFromInput = useMemo(() => {
     const parsed = Number(customTopup.replace(/[^0-9]/g, ""));
     return Number.isFinite(parsed) ? parsed : 0;
   }, [customTopup]);
+
+  const selectedWithdrawMethod = useMemo(
+    () =>
+      WITHDRAW_METHOD_OPTIONS.find((option) => option.value === withdrawMethod) ||
+      WITHDRAW_METHOD_OPTIONS[0],
+    [withdrawMethod]
+  );
+
+  useEffect(() => {
+    if (!relatedOrders || relatedOrders.length === 0) return;
+
+    walletAPI.syncOrders(
+      relatedOrders.map((order) => {
+        const mappedTransactionStatus = getEffectiveTransactionStatus(
+          order,
+          threadStatusMap?.[String(order.id)]
+        );
+        const mappedOrderStatus = getEffectiveOrderStatus(order, mappedTransactionStatus);
+
+        return {
+          id: order.id,
+          buyer_id: order.buyer_id,
+          seller_id: order.seller_id,
+          total_price: order.total_price,
+          status: mappedOrderStatus,
+          transaction_status: mappedTransactionStatus,
+        };
+      })
+    );
+  }, [relatedOrders, threadStatusMap]);
 
   if (!user || !wallet) {
     return (
@@ -75,9 +256,13 @@ export default function WalletPage() {
 
     try {
       const parsedAmount = Number(withdrawAmount.replace(/[^0-9]/g, ""));
+      const normalizedProviderName = selectedWithdrawMethod.needsProviderName
+        ? bankName
+        : WITHDRAW_METHOD_LABEL[withdrawMethod];
       const result = walletAPI.withdrawSeller(user, {
         amount: parsedAmount,
-        bank_name: bankName,
+        withdraw_method: withdrawMethod,
+        bank_name: normalizedProviderName,
         account_name: accountName,
         account_number: accountNumber,
       });
@@ -205,25 +390,38 @@ export default function WalletPage() {
                 placeholder="Nominal withdraw"
                 className="input-base w-full text-sm"
               />
-              <input
-                type="text"
-                value={bankName}
-                onChange={(event) => setBankName(event.target.value)}
-                placeholder="Nama bank"
+              <select
+                value={withdrawMethod}
+                onChange={(event) => setWithdrawMethod(event.target.value as WalletWithdrawMethod)}
                 className="input-base w-full text-sm"
-              />
+              >
+                {WITHDRAW_METHOD_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {selectedWithdrawMethod.needsProviderName && (
+                <input
+                  type="text"
+                  value={bankName}
+                  onChange={(event) => setBankName(event.target.value)}
+                  placeholder={selectedWithdrawMethod.providerPlaceholder}
+                  className="input-base w-full text-sm"
+                />
+              )}
               <input
                 type="text"
                 value={accountName}
                 onChange={(event) => setAccountName(event.target.value)}
-                placeholder="Nama pemilik rekening"
+                placeholder="Nama pemilik akun"
                 className="input-base w-full text-sm"
               />
               <input
                 type="text"
                 value={accountNumber}
                 onChange={(event) => setAccountNumber(event.target.value)}
-                placeholder="Nomor rekening"
+                placeholder={selectedWithdrawMethod.accountPlaceholder}
                 className="input-base w-full text-sm"
               />
               <button type="submit" disabled={isSubmitting} className="btn-primary text-xs w-full">
@@ -240,6 +438,7 @@ export default function WalletPage() {
                 <div className="space-y-1 text-xs text-text-secondary">
                   <p>Ref: {latestReceipt.reference_number}</p>
                   <p>Nominal: {formatRupiah(latestReceipt.amount)}</p>
+                  <p>Metode: {WITHDRAW_METHOD_LABEL[latestReceipt.withdraw_method || "bank_transfer"]}</p>
                   <p>Bank: {latestReceipt.bank_name}</p>
                   <p>Rekening: {latestReceipt.account_number}</p>
                   <p>Nama: {latestReceipt.account_name}</p>

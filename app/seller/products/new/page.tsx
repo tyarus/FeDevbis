@@ -116,6 +116,8 @@ export default function NewProductPage() {
         stock: data.stock,
         image_url: data.image_url,
         status: data.status,
+        game_category: data.game_category ?? gameCategory,
+        login_method: data.login_method ?? loginMethod,
       };
 
       const response = await apiClient.post("/products", payload);

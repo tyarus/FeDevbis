@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
+import {
+  canFetchTransactionThread,
+  getEffectiveOrderStatus,
+  getEffectiveTransactionStatus,
+  isChecklistCompleted,
+} from "@/lib/orderStatus";
+import { transactionChatAPI } from "@/lib/transactionChat";
 import { useWalletOverview } from "@/lib/useWallet";
 import { walletAPI } from "@/lib/wallet";
-import { Product, Order, PaginatedResponse } from "@/types";
+import { Product, Order, PaginatedResponse, TransactionStatus } from "@/types";
 import { useAuthStore } from "@/store/authStore";
 import { OrderStatusBadge, LoadingSkeleton, EmptyState } from "@/components";
 import { formatRupiah, formatShortId } from "@/lib/utils";
@@ -44,25 +51,98 @@ export default function SellerDashboardPage() {
 
   const totalProducts = productsData?.pagination.total || 0;
   const totalOrders = ordersData?.pagination.total || 0;
-  const pendingPayment = ordersData?.data?.filter((o) => o.status === "pending_payment").length || 0;
-  const processingOrders = ordersData?.data?.filter((o) => o.status === "processing").length || 0;
-  const shippedOrders = ordersData?.data?.filter((o) => o.status === "shipped" || o.status === "delivered").length || 0;
-  const needsProcessing = pendingPayment + processingOrders;
-
   const recentOrders = useMemo(() => ordersData?.data || [], [ordersData?.data]);
+  const orderIdsKey = useMemo(
+    () =>
+      recentOrders
+        .map((order) => String(order.id))
+        .sort()
+        .join(","),
+    [recentOrders]
+  );
+
+  const { data: threadStatusMap } = useSWR<Record<string, TransactionStatus>>(
+    orderIdsKey ? `seller-dashboard-thread-status:${orderIdsKey}` : null,
+    async () => {
+      const entries = await Promise.all(
+        recentOrders.map(async (order) => {
+          if (!canFetchTransactionThread(order.status)) {
+            return [String(order.id), order.transaction_status || "chat_open"] as const;
+          }
+
+          try {
+            const thread = await transactionChatAPI.getThread(String(order.id));
+            const checklistDone = isChecklistCompleted(thread.checklist);
+            const status = checklistDone ? "completed" : thread.status;
+            return [String(order.id), status] as const;
+          } catch {
+            return [String(order.id), order.transaction_status || "chat_open"] as const;
+          }
+        })
+      );
+
+      return Object.fromEntries(entries);
+    },
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      refreshInterval: 6000,
+    }
+  );
 
   useEffect(() => {
     if (recentOrders.length === 0) return;
     walletAPI.syncOrders(
-      recentOrders.map((order) => ({
-        id: order.id,
-        buyer_id: order.buyer_id,
-        seller_id: order.seller_id,
-        total_price: order.total_price,
-        status: order.status,
-      }))
+      recentOrders.map((order) => {
+        const mappedTransactionStatus = getEffectiveTransactionStatus(
+          order,
+          threadStatusMap?.[String(order.id)]
+        );
+        const mappedOrderStatus = getEffectiveOrderStatus(order, mappedTransactionStatus);
+
+        return {
+          id: order.id,
+          buyer_id: order.buyer_id,
+          seller_id: order.seller_id,
+          total_price: order.total_price,
+          status: mappedOrderStatus,
+          transaction_status: mappedTransactionStatus,
+        };
+      })
     );
-  }, [recentOrders]);
+  }, [recentOrders, threadStatusMap]);
+
+  const getTransactionStatus = useCallback(
+    (order: Order): TransactionStatus | undefined =>
+      getEffectiveTransactionStatus(order, threadStatusMap?.[String(order.id)]),
+    [threadStatusMap]
+  );
+
+  const getEffectiveStatus = useCallback(
+    (order: Order): Order["status"] => getEffectiveOrderStatus(order, getTransactionStatus(order)),
+    [getTransactionStatus]
+  );
+
+  const pendingPayment = useMemo(
+    () => recentOrders.filter((order) => getEffectiveStatus(order) === "pending_payment").length,
+    [recentOrders, getEffectiveStatus]
+  );
+
+  const processingOrders = useMemo(
+    () => recentOrders.filter((order) => getEffectiveStatus(order) === "processing").length,
+    [recentOrders, getEffectiveStatus]
+  );
+
+  const shippedOrders = useMemo(
+    () =>
+      recentOrders.filter((order) => {
+        const effectiveStatus = getEffectiveStatus(order);
+        return effectiveStatus === "shipped" || effectiveStatus === "delivered";
+      }).length,
+    [recentOrders, getEffectiveStatus]
+  );
+
+  const needsProcessing = pendingPayment + processingOrders;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -249,7 +329,7 @@ export default function SellerDashboardPage() {
                               {formatRupiah(order.total_price)}
                             </td>
                             <td className="px-6 py-4">
-                              <OrderStatusBadge status={order.status} size="sm" />
+                              <OrderStatusBadge status={getEffectiveStatus(order)} size="sm" />
                             </td>
                             <td className="px-6 py-4">
                               <Link
@@ -285,7 +365,10 @@ export default function SellerDashboardPage() {
                   </h3>
                   <ul className="space-y-2">
                     {recentOrders
-                      .filter((o) => ["pending_payment", "paid", "processing"].includes(o.status))
+                      .filter((order) => {
+                        const effectiveStatus = getEffectiveStatus(order);
+                        return ["pending_payment", "paid", "processing"].includes(effectiveStatus);
+                      })
                       .slice(0, 3)
                       .map((order) => (
                         <li key={order.id} className="p-3 bg-gray-50 rounded-lg hover:bg-red-50 transition-colors border border-gray-200 hover:border-red-200">

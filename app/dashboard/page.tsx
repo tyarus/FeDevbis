@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { apiClient } from "@/lib/api";
+import {
+  canFetchTransactionThread,
+  getEffectiveOrderStatus,
+  getEffectiveTransactionStatus,
+  isChecklistCompleted,
+} from "@/lib/orderStatus";
+import { transactionChatAPI } from "@/lib/transactionChat";
 import { useWalletOverview } from "@/lib/useWallet";
 import { walletAPI } from "@/lib/wallet";
-import { Order, PaginatedResponse } from "@/types";
+import { Order, PaginatedResponse, TransactionStatus } from "@/types";
 import { useAuthStore } from "@/store/authStore";
 import { OrderStatusBadge, LoadingSkeleton, EmptyState } from "@/components";
 import { formatRupiah, formatShortId } from "@/lib/utils";
@@ -20,45 +27,169 @@ import {
   ArrowRight
 } from "lucide-react";
 
-const fetcher = (url: string) =>
-  apiClient.get(url).then((res) => ({
-    data: res.data.data,
-    pagination: res.data.pagination,
-  }));
+const FETCH_PAGE_SIZE = 100;
+
+const fetchOrdersPage = async (page: number): Promise<PaginatedResponse<Order>> => {
+  const res = await apiClient.get(`/orders?page=${page}&limit=${FETCH_PAGE_SIZE}`);
+
+  return {
+    data: res.data.data || [],
+    pagination: res.data.pagination || {
+      current_page: 1,
+      total: 0,
+      per_page: FETCH_PAGE_SIZE,
+      last_page: 1,
+    },
+  };
+};
+
+const fetchAllBuyerOrders = async (): Promise<Order[]> => {
+  const firstPage = await fetchOrdersPage(1);
+  const allOrders = [...firstPage.data];
+  const lastPage = firstPage.pagination?.last_page || 1;
+
+  const remainingRequests: Array<Promise<PaginatedResponse<Order>>> = [];
+  for (let page = 2; page <= lastPage; page += 1) {
+    remainingRequests.push(fetchOrdersPage(page));
+  }
+
+  const remainingPages = await Promise.all(remainingRequests);
+  for (const pageData of remainingPages) {
+    allOrders.push(...pageData.data);
+  }
+
+  return allOrders;
+};
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
   const wallet = useWalletOverview(user);
 
-  const { data: ordersData, isLoading } = useSWR<PaginatedResponse<Order>>(
-    "/orders?limit=50",
-    fetcher,
+  const { data: allOrders, isLoading } = useSWR<Order[]>(
+    "buyer-dashboard-orders-all",
+    fetchAllBuyerOrders,
     { revalidateOnFocus: false }
   );
 
-  const orders = useMemo(() => ordersData?.data || [], [ordersData?.data]);
-  const totalOrders = ordersData?.pagination.total || 0;
-  
-  const pendingPayment = orders.filter((o) => o.status === "pending_payment").length;
-  const needsAction = orders.filter((o) => o.status === "shipped" || o.status === "delivered").length;
-  const completed = orders.filter((o) => o.status === "completed").length;
-  const totalSpent = orders.reduce((sum, o) => sum + o.total_price, 0);
+  const orders = useMemo(() => allOrders || [], [allOrders]);
+  const totalOrders = orders.length;
+  const orderIdsKey = useMemo(
+    () =>
+      orders
+        .map((order) => String(order.id))
+        .sort()
+        .join(","),
+    [orders]
+  );
 
-  const recentOrders = orders.slice(0, 5);
-  const urgentOrders = orders.filter((o) => ["pending_payment", "shipped", "delivered"].includes(o.status));
+  const { data: threadStatusMap } = useSWR<Record<string, TransactionStatus>>(
+    orderIdsKey ? `buyer-dashboard-thread-status:${orderIdsKey}` : null,
+    async () => {
+      const entries = await Promise.all(
+        orders.map(async (order) => {
+          if (!canFetchTransactionThread(order.status)) {
+            return [String(order.id), order.transaction_status || "chat_open"] as const;
+          }
+
+          try {
+            const thread = await transactionChatAPI.getThread(String(order.id));
+            const checklistDone = isChecklistCompleted(thread.checklist);
+            const status = checklistDone ? "completed" : thread.status;
+            return [String(order.id), status] as const;
+          } catch {
+            return [String(order.id), order.transaction_status || "chat_open"] as const;
+          }
+        })
+      );
+
+      return Object.fromEntries(entries);
+    },
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      refreshInterval: 6000,
+    }
+  );
 
   useEffect(() => {
     if (orders.length === 0) return;
     walletAPI.syncOrders(
-      orders.map((order) => ({
-        id: order.id,
-        buyer_id: order.buyer_id,
-        seller_id: order.seller_id,
-        total_price: order.total_price,
-        status: order.status,
-      }))
+      orders.map((order) => {
+        const mappedTransactionStatus = getEffectiveTransactionStatus(
+          order,
+          threadStatusMap?.[String(order.id)]
+        );
+        const mappedOrderStatus = getEffectiveOrderStatus(order, mappedTransactionStatus);
+
+        return {
+          id: order.id,
+          buyer_id: order.buyer_id,
+          seller_id: order.seller_id,
+          total_price: order.total_price,
+          status: mappedOrderStatus,
+          transaction_status: mappedTransactionStatus,
+        };
+      })
     );
-  }, [orders]);
+  }, [orders, threadStatusMap]);
+
+  const getTransactionStatus = useCallback(
+    (order: Order): TransactionStatus | undefined =>
+      getEffectiveTransactionStatus(order, threadStatusMap?.[String(order.id)]),
+    [threadStatusMap]
+  );
+
+  const getEffectiveStatus = useCallback(
+    (order: Order): Order["status"] => getEffectiveOrderStatus(order, getTransactionStatus(order)),
+    [getTransactionStatus]
+  );
+
+  const pendingPayment = useMemo(
+    () => orders.filter((order) => getEffectiveStatus(order) === "pending_payment").length,
+    [orders, getEffectiveStatus]
+  );
+
+  const needsAction = useMemo(
+    () =>
+      orders.filter((order) => {
+        const effectiveStatus = getEffectiveStatus(order);
+        return effectiveStatus === "shipped" || effectiveStatus === "delivered";
+      }).length,
+    [orders, getEffectiveStatus]
+  );
+
+  const completed = useMemo(
+    () => orders.filter((order) => getEffectiveStatus(order) === "completed").length,
+    [orders, getEffectiveStatus]
+  );
+
+  const totalSpent = useMemo(
+    () =>
+      orders
+        .filter((order) => {
+          const effectiveStatus = getEffectiveStatus(order);
+          return effectiveStatus !== "cancelled" && effectiveStatus !== "refunded";
+        })
+        .reduce((sum, order) => sum + order.total_price, 0),
+    [orders, getEffectiveStatus]
+  );
+
+  const recentOrders = useMemo(
+    () =>
+      [...orders]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 5),
+    [orders]
+  );
+
+  const urgentOrders = useMemo(
+    () =>
+      orders.filter((order) => {
+        const effectiveStatus = getEffectiveStatus(order);
+        return ["pending_payment", "shipped", "delivered"].includes(effectiveStatus);
+      }),
+    [orders, getEffectiveStatus]
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -226,40 +357,44 @@ export default function DashboardPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
-                        {recentOrders.map((order, idx) => (
-                          <tr
-                            key={order.id}
-                            className={`hover:bg-gray-50 transition-colors ${
-                              idx % 2 === 0 ? "bg-white" : "bg-gray-50/30"
-                            }`}
-                          >
-                            <td className="px-6 py-4">
-                              <Link
-                                href={`/orders/${order.id}`}
-                                className="text-sm font-semibold text-accent-primary hover:underline"
-                              >
-                                #{formatShortId(order.id)}
-                              </Link>
-                            </td>
-                            <td className="px-6 py-4 text-sm text-text-primary font-medium truncate">
-                              {order.product?.name || "-"}
-                            </td>
-                            <td className="px-6 py-4 text-sm font-semibold text-text-primary">
-                              {formatRupiah(order.total_price)}
-                            </td>
-                            <td className="px-6 py-4">
-                              <OrderStatusBadge status={order.status} size="sm" />
-                            </td>
-                            <td className="px-6 py-4">
-                              <Link
-                                href={`/orders/${order.id}`}
-                                className="text-sm text-accent-primary hover:underline font-semibold"
-                              >
-                                Lihat →
-                              </Link>
-                            </td>
-                          </tr>
-                        ))}
+                        {recentOrders.map((order, idx) => {
+                          const effectiveStatus = getEffectiveStatus(order);
+
+                          return (
+                            <tr
+                              key={order.id}
+                              className={`hover:bg-gray-50 transition-colors ${
+                                idx % 2 === 0 ? "bg-white" : "bg-gray-50/30"
+                              }`}
+                            >
+                              <td className="px-6 py-4">
+                                <Link
+                                  href={`/orders/${order.id}`}
+                                  className="text-sm font-semibold text-accent-primary hover:underline"
+                                >
+                                  #{formatShortId(order.id)}
+                                </Link>
+                              </td>
+                              <td className="px-6 py-4 text-sm text-text-primary font-medium truncate">
+                                {order.product?.name || "-"}
+                              </td>
+                              <td className="px-6 py-4 text-sm font-semibold text-text-primary">
+                                {formatRupiah(order.total_price)}
+                              </td>
+                              <td className="px-6 py-4">
+                                <OrderStatusBadge status={effectiveStatus} size="sm" />
+                              </td>
+                              <td className="px-6 py-4">
+                                <Link
+                                  href={`/orders/${order.id}`}
+                                  className="text-sm text-accent-primary hover:underline font-semibold"
+                                >
+                                  Lihat →
+                                </Link>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
