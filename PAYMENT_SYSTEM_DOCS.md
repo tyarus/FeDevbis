@@ -220,3 +220,33 @@ components/
 
 **Last Updated**: May 4, 2026
 **Status**: ✅ Production Ready
+
+## Midtrans Gateway Update (May 25, 2026)
+
+### New Integration Flow
+
+1. Buyer create order from checkout (`POST /orders`).
+2. On payment page:
+   - `ewallet` uses existing Crowalet escrow flow.
+   - `bank_transfer` and `virtual_account` call local Next route:
+     - `POST /api/payment-gateway/midtrans/snap-token`
+3. Frontend redirects user to Midtrans `redirect_url`.
+4. User returns to `/payment/[orderId]` with callback query.
+5. Frontend verifies transaction status via:
+   - `POST /api/payment-gateway/midtrans/status`
+6. If Midtrans status is paid (`capture`/`settlement`), frontend finalizes order payment to backend using:
+   - `POST /orders/{id}/pay`
+
+### Added Files
+
+- `app/api/payment-gateway/midtrans/snap-token/route.ts`
+- `app/api/payment-gateway/midtrans/status/route.ts`
+- `lib/paymentGateway.ts`
+- `lib/midtransServer.ts`
+
+### Required Environment Variables
+
+- `NEXT_PUBLIC_APP_URL`
+- `MIDTRANS_SERVER_KEY`
+- `MIDTRANS_IS_PRODUCTION`
+- `NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION`
